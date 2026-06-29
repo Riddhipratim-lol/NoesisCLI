@@ -1,0 +1,15 @@
+langchain
+langchain-google-genai
+langgraph
+tree-sitter
+tree-sitter-languages
+networkx
+onnxruntime
+optimum
+transformers
+tokenizers
+chromadb
+rank-bm25
+rich
+python-dotenv
+pytest

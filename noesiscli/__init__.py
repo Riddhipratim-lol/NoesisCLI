@@ -1,0 +1,3 @@
+"""
+NoesisCLI: Local Codebase Architect
+"""

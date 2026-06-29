@@ -6,11 +6,15 @@ NoesisCLI is an AI-powered Local Codebase Architect designed to help developers 
 
 Traditional Retrieval-Augmented Generation (RAG) systems treat source code as plain text and split it into arbitrary character chunks. This often breaks functions, loses semantic boundaries, and retrieves incomplete logic, resulting in inaccurate responses.
 
-NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing. Instead of chunking code by character count, it understands programming language structure and indexes complete functions, classes, methods, interfaces, and modules.
+NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing with Tree-sitter. Instead of chunking code by character count, it understands programming language structure (supporting Python, JavaScript, TypeScript, Go, Java, and C++) and indexes complete functions, classes, methods, interfaces, and modules. To optimize ingestion performance, parsing is distributed in parallel across multiple CPU cores.
 
-The system first determines whether the user's query actually requires repository analysis. General programming questions are answered directly by the Large Language Model, while repository-specific s questions are routed through the RAG pipeline. This intelligent routing avoids unnecessary retrieval, reduces latency, and makes the system more efficient.
+During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains. It enriches chunks lacking documentation with AI-generated summaries and structured metadata, generating embeddings in batches using a local embedding model.
 
-For repository-aware queries, NoesisCLI creates semantic embeddings for every parsed code entity, stores them in a vector database, and combines dense vector search with lexical search to accurately retrieve the most relevant code segments. Only the required portions of the repository are provided to the Large Language Model, significantly reducing token usage and response latency.
+Before executing any RAG pipeline components, NoesisCLI performs query validation to ensure the prompt is programming-related. Once validated, the query router determines whether the query requires repository analysis. General programming questions are answered directly, while repository-specific queries are routed through the RAG pipeline, avoiding unnecessary retrieval, reducing latency, and saving computational resources.
+
+For repository-aware queries, NoesisCLI executes parallel semantic search (using ChromaDB dense vectors) and lexical search (using a BM25 index), merging the results using Reciprocal Rank Fusion (RRF). Rather than sending raw files, the system uses the Symbol Table and Dependency Graph to surgically prune non-essential code bodies into signatures and placeholders, presenting a context-minimized skeletal file structure to the model.
+
+To ensure robustness and low latency, the system utilizes a multi-model architecture. It leverages Gemini 3.5 Flash for complex reasoning and summarization tasks, and Gemini 3.1 Flash-Lite for rapid validation, routing, and fallback support (automatically falling back if rate limits or API failures occur on the primary model). Finally, explanations are streamed directly to the terminal in real-time.
 
 The entire system runs locally on the user's machine, making it suitable for private repositories while maintaining fast retrieval performance.
 
