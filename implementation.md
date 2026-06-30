@@ -7,7 +7,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 ## [ ] Phase 1 — Core CLI & Base RAG Pipeline (Working Base Model)
 **Objective:** Build a minimal end-to-end local RAG pipeline to ingest a repository, parse Python code using Tree-sitter, compute local embeddings, store them in ChromaDB, retrieve relevant chunks, and stream answers from Gemini via a CLI interface.
 
-### [ ] 1.1: CLI Setup & Repository Ingestion
+### [x] 1.1: CLI Setup & Repository Ingestion
 * **What it does:** Establishes the basic CLI entry point and scans a local directory to find Python files, ignoring files matching standard patterns (like `.venv`, `__pycache__`, `.git`).
 * **What it takes (Inputs):**
   * Command-line arguments: `noesiscli analyze <repo_path>` and `noesiscli query "<prompt>"`.

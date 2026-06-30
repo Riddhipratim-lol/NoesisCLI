@@ -1,6 +1,4 @@
-def main():
-    print("Hello from noesiscli!")
-
+from noesiscli.cli import main
 
 if __name__ == "__main__":
     main()
