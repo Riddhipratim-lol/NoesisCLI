@@ -25,7 +25,7 @@ class TreeSitterParser:
 
     def parse_code(self, code: str, file_path: str) -> list[dict]:
         """
-        Parses source code and returns a list of semantic code chunks (classes, functions, methods).
+        Parses source code and returns a list of semantic code chunks (classes, functions, methods, global).
         """
         if not code:
             return []
@@ -35,7 +35,42 @@ class TreeSitterParser:
         root_node = tree.root_node
         
         code_bytes = code.encode("utf8")
-        return self._extract_chunks_from_node(root_node, code_bytes, file_path, inside_class=False)
+        
+        chunks = []
+        pending_global_nodes = []
+
+        def process_pending_global():
+            if not pending_global_nodes:
+                return
+            start_byte = pending_global_nodes[0].start_byte
+            end_byte = pending_global_nodes[-1].end_byte
+            start_line = pending_global_nodes[0].start_point[0] + 1
+            end_line = pending_global_nodes[-1].end_point[0] + 1
+            
+            content = code_bytes[start_byte:end_byte].decode("utf8", errors="replace").strip()
+            if content:
+                chunks.append({
+                    "code_content": content,
+                    "file_path": file_path,
+                    "node_type": "global",
+                    "start_line": start_line,
+                    "end_line": end_line
+                })
+            pending_global_nodes.clear()
+
+        # Iterate top-level children under module root
+        for child in root_node.children:
+            if child.type in ("class_definition", "function_definition", "decorated_definition"):
+                process_pending_global()
+                chunks.extend(self._extract_chunks_from_node(child, code_bytes, file_path, inside_class=False))
+            elif child.type in ("import_statement", "import_from_statement"):
+                process_pending_global()
+                # Skip import statements
+            else:
+                pending_global_nodes.append(child)
+
+        process_pending_global()
+        return chunks
 
     def parse_file(self, file_path: str) -> list[dict]:
         """

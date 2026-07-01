@@ -137,3 +137,44 @@ def test_cli_analyze(temp_repo):
         assert "class" in node_types
         assert "function" in node_types
 
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_global_chunks():
+    """Test that the parser extracts top-level/global chunks while excluding imports."""
+    parser = TreeSitterParser(language="python")
+    code = """
+\"\"\"
+Module docstring.
+\"\"\"
+import os
+import sys
+
+# Global configuration
+API_VERSION = "v1"
+DEBUG = True
+
+class Service:
+    pass
+
+# Helper call
+configure_logging()
+"""
+    chunks = parser.parse_code(code, file_path="/mock/path.py")
+    
+    global_chunks = [c for c in chunks if c.get("node_type") == "global"]
+    class_chunks = [c for c in chunks if c.get("node_type") == "class"]
+    
+    assert len(class_chunks) == 1
+    assert len(global_chunks) == 3
+    
+    # Verify contents
+    assert "Module docstring." in global_chunks[0]["code_content"]
+    assert "API_VERSION = \"v1\"" in global_chunks[1]["code_content"]
+    assert "configure_logging()" in global_chunks[2]["code_content"]
+    
+    # Ensure imports are NOT in any chunk content
+    for chunk in chunks:
+        assert "import os" not in chunk["code_content"]
+        assert "import sys" not in chunk["code_content"]
+
+

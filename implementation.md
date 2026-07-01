@@ -19,16 +19,16 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Parsed file paths list goes to Tree-sitter Parser (Phase 1.2 / Phase 5.2) for AST construction, raw source files go to Code Structure Pruner (Phase 7.2) for skeletal structure creation, and root path goes to Directory Manager (Phase 8.2) to specify the `.noesis/` storage location.
 
 ### [x] 1.2: Tree-Sitter Parser & Base Semantic Chunker
-* **What it does:** Uses Tree-sitter to parse Python files into ASTs and extract functional definitions (functions and classes) as semantic chunks, preserving exact block ranges instead of splitting by character counts.
+* **What it does:** Uses Tree-sitter to parse Python files into ASTs and extract functional definitions (functions and classes) as well as top-level/global statements as semantic chunks, preserving exact block ranges instead of splitting by character counts. Import statements are skipped.
 * **What it takes (Inputs):**
   * A list of python file paths `List[str]`.
 * **What it returns (Outputs):**
   * A list of structured Code Chunk dictionaries/objects, each containing:
-    * `code_content`: The raw source code of the function/class.
+    * `code_content`: The raw source code of the function/class/global block.
     * `file_path`: Absolute path of the source file.
-    * `node_type`: `class`, `function`, or `method`.
+    * `node_type`: `class`, `function`, `method`, or `global`.
     * `start_line` / `end_line`: 1-indexed integers representing the position in the file.
-* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Write queries or AST traversals that target `class_definition` and `function_definition` nodes.
+* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Write AST traversals that target `class_definition`, `function_definition`, and group consecutive top-level statements into `"global"` chunks, while ignoring `import_statement` and `import_from_statement` nodes.
 * **Interconnections & Data Flow:**
   * **Inputs from:** List of file paths from CLI Setup & Ingestion (Phase 1.1).
   * **Outputs to:** Local ONNX Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
@@ -193,8 +193,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **What it takes (Inputs):**
   * Source files of various file extensions (`.py`, `.js`, `.ts`, `.go`, `.java`, `.cpp`, `.h`).
 * **What it returns (Outputs):**
-  * Language-specific structured AST nodes and chunks.
-* **Technical details:** Compile and load Tree-sitter grammars dynamically for each extension. Write specific parser rules or queries for each language to extract symbols (functions/classes/methods/interfaces) accurately.
+  * Language-specific structured AST nodes and chunks (including functional definitions and global/module-level code chunks).
+* **Technical details:** Compile and load Tree-sitter grammars dynamically for each extension. Write specific parser rules or queries for each language to extract symbols (functions/classes/methods/interfaces/global chunks) accurately.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Scan list of files from CLI Ingestion (Phase 1.1).
   * **Outputs to:** Parsed structures sent to worker subprocesses of Multiprocessing Parser Pipeline (Phase 5.2).
