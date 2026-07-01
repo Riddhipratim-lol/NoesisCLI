@@ -10,6 +10,7 @@ import argparse
 import sys
 import os
 from noesiscli.parser.scanner import RepositoryScanner
+from noesiscli.parser.tree_sitter_parser import TreeSitterParser
 
 def main():
     parser = argparse.ArgumentParser(description="NoesisCLI — Local Codebase Architect")
@@ -36,7 +37,22 @@ def main():
         print(f"Found {len(files)} source files in {os.path.abspath(repo_path)}:")
         for f in files:
             print(f)
-        return files
+        
+        # Filter python files for AST parsing
+        python_files = [f for f in files if f.endswith(".py")]
+        
+        # Parse files using TreeSitterParser
+        parser = TreeSitterParser(language="python")
+        all_chunks = []
+        for f in python_files:
+            chunks = parser.parse_file(f)
+            all_chunks.extend(chunks)
+            
+        print(f"\nParsed {len(python_files)} Python files into {len(all_chunks)} semantic chunks.")
+        for chunk in all_chunks:
+            print(f" - [{chunk['node_type'].upper()}] {chunk['file_path']} (Lines {chunk['start_line']}-{chunk['end_line']})")
+            
+        return all_chunks
         
     elif args.command == "query":
         print(f"Querying: '{args.prompt}' (RAG query execution placeholder)")

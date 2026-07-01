@@ -124,3 +124,16 @@ def test_parallel_parser(mock_pool):
     assert isinstance(results, list)
     assert len(results) > 0
     mock_instance.map.assert_called_once()
+
+
+def test_cli_analyze(temp_repo):
+    """Test that CLI analyze command successfully scans and parses Python files."""
+    from noesiscli.cli import main
+    with patch("sys.argv", ["noesiscli", "analyze", temp_repo]):
+        chunks = main()
+        assert isinstance(chunks, list)
+        assert len(chunks) > 0
+        node_types = [c.get("node_type") for c in chunks]
+        assert "class" in node_types
+        assert "function" in node_types
+
