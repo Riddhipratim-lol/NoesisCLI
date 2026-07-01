@@ -19,16 +19,17 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Parsed file paths list goes to Tree-sitter Parser (Phase 1.2 / Phase 5.2) for AST construction, raw source files go to Code Structure Pruner (Phase 7.2) for skeletal structure creation, and root path goes to Directory Manager (Phase 8.2) to specify the `.noesis/` storage location.
 
 ### [x] 1.2: Tree-Sitter Parser & Base Semantic Chunker
-* **What it does:** Uses Tree-sitter to parse Python files into ASTs and extract functional definitions (functions and classes) as well as top-level/global statements as semantic chunks, preserving exact block ranges instead of splitting by character counts. Import statements are skipped.
+* **What it does:** Uses Tree-sitter to parse Python files into ASTs, extracting modules, class definitions, method definitions, functions, imports, constants, type aliases, and global blocks as semantic chunks. Preserves decorators, async structures, and exact block line ranges without splitting by character counts.
 * **What it takes (Inputs):**
   * A list of python file paths `List[str]`.
 * **What it returns (Outputs):**
   * A list of structured Code Chunk dictionaries/objects, each containing:
-    * `code_content`: The raw source code of the function/class/global block.
+    * `code_content`: The raw source code of the chunk.
     * `file_path`: Absolute path of the source file.
-    * `node_type`: `class`, `function`, `method`, or `global`.
+    * `node_type`: `module`, `imports`, `class`, `class_header`, `method`, `function`, `constant`, `type_alias`, or `global`.
     * `start_line` / `end_line`: 1-indexed integers representing the position in the file.
-* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Write AST traversals that target `class_definition`, `function_definition`, and group consecutive top-level statements into `"global"` chunks, while ignoring `import_statement` and `import_from_statement` nodes.
+    * `metadata`: Structured dictionary containing `decorators`, `is_async`, `parent_class`, `is_dunder`, `special_type`, `docstring`, and `imports_in_file`.
+* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Write AST traversals that handle `class_definition` (emitting both full `class` and signature-only `class_header` chunks), `function_definition` (detecting async functions by looking for an `async` child token), `decorated_definition` (resolving starts to ensure decorators are included in content), and `expression_statement` assignments to classify top-level declarations as `constant`, `type_alias`, or `global`. Aggregated import nodes (`import_statement`, `import_from_statement`) are parsed into a single dedicated `imports` chunk and also populated in the `imports_in_file` metadata list.
 * **Interconnections & Data Flow:**
   * **Inputs from:** List of file paths from CLI Setup & Ingestion (Phase 1.1).
   * **Outputs to:** Local ONNX Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
@@ -161,25 +162,25 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 ### [ ] 4.1: Global Symbol Table Builder
 * **What it does:** Extracts declarations of all classes, methods, functions, and interfaces, mapping symbol names to their signatures, enclosing classes/scopes, file paths, and visibility.
 * **What it takes (Inputs):**
-  * AST objects for all parsed files.
+  * Structured Code Chunks (from Phase 1.2 / Phase 5.2).
 * **What it returns (Outputs):**
   * A Global Symbol Table registry: a dictionary mapping `symbol_name -> List[SymbolDefinition]`.
-* **Technical details:** Walk the parsed AST nodes to capture names and locations of definitions. Write a fast-lookup data structure that can search symbols by name (case-sensitive and case-insensitive).
+* **Technical details:** Walk the parsed code chunks (filtering by `class`, `method`, and `function` types) to capture signatures, enclosing scopes, and line locations. Write a fast-lookup data structure that can search symbols by name (case-sensitive and case-insensitive).
 * **Interconnections & Data Flow:**
-  * **Inputs from:** AST node data structures extracted by Tree-sitter (Phase 1.2 / Phase 5.2).
+  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2).
   * **Outputs to:** In-memory references used by Dependency Graph Constructor (Phase 4.2), Metadata Extractor (Phase 6.1), and Dependency Context Resolver (Phase 7.1).
   * **Integration Notes:** Saved and loaded from the `.noesis/` directory via Directory & Persistence Manager (Phase 8.2).
 
 ### [ ] 4.2: Codebase Dependency Graph Constructor
-* **What it does:** Scans AST import statements and function call patterns, creating connections between files and symbols across the entire repository.
+* **What it does:** Scans imports and function call patterns, creating connections between files and symbols across the entire repository.
 * **What it takes (Inputs):**
-  * AST objects for all parsed files.
+  * Structured Code Chunks (including dedicated `imports` chunks).
   * The Global Symbol Table.
 * **What it returns (Outputs):**
   * A directed codebase graph (`networkx.DiGraph`). Nodes represent files/classes/functions, and edges represent imports, function calls, or inheritance relations.
-* **Technical details:** Use `networkx` to build and query the graph. For each function body, search for function calls that match symbols in the global Symbol Table to map out method dependencies.
+* **Technical details:** Use `networkx` to build and query the graph. Scan the aggregated `imports` chunks to map out file-to-file import relationships. For each function and class chunk, search for function calls/method invocation patterns that match symbols in the global Symbol Table to map out granular dependency edges.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** AST node structures (Phase 1.2 / Phase 5.2) and Global Symbol Table (Phase 4.1).
+  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2) and Global Symbol Table (Phase 4.1).
   * **Outputs to:** Metadata Extractor (Phase 6.1) for dependency counting, and Dependency Context Resolver (Phase 7.1) for relational search.
   * **Integration Notes:** Serialized on disk and restored on start by Directory & Persistence Manager (Phase 8.2).
 
@@ -205,8 +206,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **What it takes (Inputs):**
   * A list of file paths to parse.
 * **What it returns (Outputs):**
-  * Aggregated list of AST objects, Symbol Table definitions, and dependency edges.
-* **Technical details:** Implement a worker function that receives a file path, parses it, extracts symbols and dependencies, and returns them. Use `multiprocessing.Pool` or `concurrent.futures.ProcessPoolExecutor` with batching to minimize process communication overhead.
+  * Aggregated list of structured Code Chunks.
+* **Technical details:** Implement a worker function that receives a file path, parses it using the Tree-sitter parser to extract structured Code Chunks, and returns them. Use `multiprocessing.Pool` or `concurrent.futures.ProcessPoolExecutor` with batching to minimize process communication overhead.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Ingestion file list (Phase 1.1) and parser configurations (Phase 5.1).
   * **Outputs to:** Feeds aggregated parsing data to Symbol Table Builder (Phase 4.1), Dependency Graph Constructor (Phase 4.2), and Semantic Chunker (Phase 1.2/6.1).
@@ -274,7 +275,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Reference symbol list (signatures).
 * **What it returns (Outputs):**
   * Pruned code blocks representing the codebase structures.
-* **Technical details:** Use the Tree-sitter AST nodes to surgically replace method bodies with empty bodies or standard placeholders.
+* **Technical details:** Leverage pre-computed `class_header` chunks when generating the skeletal/signature-only representations of unretrieved reference classes, and surgically replace method bodies in retrieved modules using Tree-sitter.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Target/reference lists (Phase 7.1) and raw source files (Phase 1.1). Leverages Tree-sitter parsers (Phase 1.2 / Phase 5.1).
   * **Outputs to:** Skeletal pruned code context blocks sent to Prompt Constructor (Phase 7.3).

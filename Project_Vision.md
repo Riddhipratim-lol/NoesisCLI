@@ -252,14 +252,14 @@ Since parsing is CPU-intensive, parallel execution drastically reduces repositor
 
 Each parser extracts:
 
-- Classes
-- Functions
-- Methods
-- Interfaces
-- Constructors
-- Imports
-- Docstrings
-- Comments
+- Classes and Class Headers (signatures with method summaries)
+- Functions (including async functions)
+- Methods (retained in scope with parent class context)
+- Imports (aggregated into a first-class chunk)
+- Constants (ALL_CAPS module-level variables)
+- Type Aliases (module-level typing constructs)
+- Docstrings (module-level, class-level, and function-level)
+- Decorators (retained and associated with classes/methods/functions)
 
 Rather than producing plain text, Tree-sitter generates an Abstract Syntax Tree representing the grammatical structure of each file.
 
@@ -274,15 +274,14 @@ Instead of:
 The parser produces:
 
 ```
+Module: UserService Module
+Imports: import sys, from typing import Optional
+Constant: MAX_RETRIES = 5
 Class: UserService
-
-Function: authenticate()
-
-Function: validate_token()
-
-Function: logout()
-
-Class: Database
+Class Header: UserService (with docstring & signatures)
+Method: authenticate()
+Method: logout()
+Function: verify_token()
 ```
 
 ### Input
@@ -291,13 +290,13 @@ Source files.
 
 ### Output
 
-Structured AST objects.
+Structured Code Chunks.
 
 ---
 
 ## Phase 5 — Symbol Table & Dependency Graph Construction
 
-To enable precise cross-referencing and contextual understanding, NoesisCLI processes the AST objects to construct a global Symbol Table and a Dependency Graph.
+To enable precise cross-referencing and contextual understanding, NoesisCLI processes the structured Code Chunks to construct a global Symbol Table and a Dependency Graph.
 
 ### Global Symbol Table
 The symbol table maps all code symbols (such as classes, methods, functions, and interfaces) to their definitions, file locations, signatures, and scopes. This allows the system to resolve exact symbol names during retrieval and locate where they are declared.
@@ -309,7 +308,7 @@ By building these structures, NoesisCLI can resolve references and fetch related
 
 ### Input
 
-Structured AST objects.
+Structured Code Chunks.
 
 ### Output
 
@@ -330,23 +329,23 @@ Each chunk represents exactly one logical programming construct.
 
 Examples:
 
-- One function
-- One class
-- One method
-- One interface
-- One module
+- Module overview (`module`)
+- Dedicated import aggregation (`imports`)
+- Full class body (`class`)
+- Class header summary (`class_header`)
+- Individual method (`method`)
+- Standalone function (`function`)
+- Constant assignment (`constant`)
+- Type alias declaration (`type_alias`)
+- Other top-level block (`global`)
 
 Each chunk contains:
 
-- Source code
-- Signature
-- Parent class
-- File path
-- Start line
-- End line
-- Imports
-- Docstring
-- Associated symbol identifiers (linked to the Symbol Table)
+- Source code (`code_content`)
+- File path (`file_path`)
+- Node type (`node_type`)
+- Start line & End line (`start_line`, `end_line`)
+- Rich structural metadata (`decorators`, `is_async`, `parent_class`, `is_dunder`, `special_type`, `docstring`, `imports_in_file`)
 
 This preserves complete semantic meaning.
 
