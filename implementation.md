@@ -15,7 +15,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A list of absolute file paths to python files `List[str]`.
 * **Technical details:** Use Python's built-in `argparse` module and `os.walk` to scan directories.
 
-### [ ] 1.2: Tree-Sitter Parser & Base Semantic Chunker
+### [x] 1.2: Tree-Sitter Parser & Base Semantic Chunker
 * **What it does:** Uses Tree-sitter to parse Python files into ASTs and extract functional definitions (functions and classes) as semantic chunks, preserving exact block ranges instead of splitting by character counts.
 * **What it takes (Inputs):**
   * A list of python file paths `List[str]`.

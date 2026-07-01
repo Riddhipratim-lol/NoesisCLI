@@ -3,5 +3,6 @@ AST Parsing, codebase scanning, and relationship graph construction for NoesisCL
 """
 
 from noesiscli.parser.scanner import RepositoryScanner
+from noesiscli.parser.tree_sitter_parser import TreeSitterParser
 
-__all__ = ["RepositoryScanner"]
+__all__ = ["RepositoryScanner", "TreeSitterParser"]
