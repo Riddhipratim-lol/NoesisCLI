@@ -139,8 +139,8 @@ def test_cli_analyze(temp_repo):
 
 
 @pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
-def test_tree_sitter_parser_global_chunks():
-    """Test that the parser extracts top-level/global chunks while excluding imports."""
+def test_tree_sitter_parser_module_and_imports():
+    """Test that the parser extracts a module chunk and a dedicated imports chunk."""
     parser = TreeSitterParser(language="python")
     code = """
 \"\"\"
@@ -148,33 +148,157 @@ Module docstring.
 \"\"\"
 import os
 import sys
-
-# Global configuration
-API_VERSION = "v1"
-DEBUG = True
-
-class Service:
-    pass
-
-# Helper call
-configure_logging()
 """
     chunks = parser.parse_code(code, file_path="/mock/path.py")
     
-    global_chunks = [c for c in chunks if c.get("node_type") == "global"]
-    class_chunks = [c for c in chunks if c.get("node_type") == "class"]
+    module_chunks = [c for c in chunks if c.get("node_type") == "module"]
+    imports_chunks = [c for c in chunks if c.get("node_type") == "imports"]
     
-    assert len(class_chunks) == 1
-    assert len(global_chunks) == 3
+    assert len(module_chunks) == 1
+    assert len(imports_chunks) == 1
     
-    # Verify contents
-    assert "Module docstring." in global_chunks[0]["code_content"]
-    assert "API_VERSION = \"v1\"" in global_chunks[1]["code_content"]
-    assert "configure_logging()" in global_chunks[2]["code_content"]
+    # Verify module chunk
+    assert 'Module docstring.' in module_chunks[0]["code_content"]
+    assert 'import os' in module_chunks[0]["code_content"]
+    assert module_chunks[0]["metadata"]["module_docstring"] == '"""\nModule docstring.\n"""'
+    assert module_chunks[0]["metadata"]["imports_in_file"] == ["import os", "import sys"]
     
-    # Ensure imports are NOT in any chunk content
-    for chunk in chunks:
-        assert "import os" not in chunk["code_content"]
-        assert "import sys" not in chunk["code_content"]
+    # Verify imports chunk
+    assert "import os\nimport sys" == imports_chunks[0]["code_content"]
+    assert imports_chunks[0]["metadata"]["imports_in_file"] == ["import os", "import sys"]
+    assert imports_chunks[0]["metadata"]["imports_parsed"] == ["import os", "import sys"]
+
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_global_classification():
+    """Test that global statements are classified into 'constant', 'type_alias', or 'global'."""
+    parser = TreeSitterParser(language="python")
+    
+    # 1. Constant
+    chunks_const = parser.parse_code("API_VERSION = 'v1'\nDEBUG = True", file_path="/mock/path.py")
+    constant_chunks = [c for c in chunks_const if c.get("node_type") == "constant"]
+    assert len(constant_chunks) == 1
+    assert "API_VERSION = 'v1'\nDEBUG = True" in constant_chunks[0]["code_content"]
+    
+    # 2. Type Alias
+    chunks_alias = parser.parse_code("MyType = Union[int, str]\nX: TypeAlias = int", file_path="/mock/path.py")
+    type_alias_chunks = [c for c in chunks_alias if c.get("node_type") == "type_alias"]
+    assert len(type_alias_chunks) == 1
+    assert "MyType = Union[int, str]\nX: TypeAlias = int" in type_alias_chunks[0]["code_content"]
+    
+    # 3. Global expression/call
+    chunks_global = parser.parse_code("configure_logging()", file_path="/mock/path.py")
+    global_chunks = [c for c in chunks_global if c.get("node_type") == "global"]
+    assert len(global_chunks) == 1
+    assert "configure_logging()" in global_chunks[0]["code_content"]
+
+
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_decorators():
+    """Test that decorated functions and classes include decorators in code content and metadata."""
+    parser = TreeSitterParser(language="python")
+    code = """
+@deco
+def my_func():
+    pass
+
+@class_deco
+class MyClass:
+    @property
+    def my_prop(self):
+        return 42
+"""
+    chunks = parser.parse_code(code, file_path="/mock/path.py")
+    
+    func_chunk = [c for c in chunks if c.get("node_type") == "function"][0]
+    assert func_chunk["code_content"].startswith("@deco")
+    assert func_chunk["metadata"]["decorators"] == ["@deco"]
+    
+    class_chunk = [c for c in chunks if c.get("node_type") == "class"][0]
+    assert class_chunk["code_content"].startswith("@class_deco")
+    assert class_chunk["metadata"]["decorators"] == ["@class_deco"]
+    
+    method_chunk = [c for c in chunks if c.get("node_type") == "method"][0]
+    assert method_chunk["code_content"].startswith("@property")
+    assert method_chunk["metadata"]["decorators"] == ["@property"]
+    assert method_chunk["metadata"]["special_type"] == "property"
+
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_async_functions():
+    """Test that async functions are correctly parsed with is_async metadata."""
+    parser = TreeSitterParser(language="python")
+    code = """
+async def async_func(x):
+    return x
+"""
+    chunks = parser.parse_code(code, file_path="/mock/path.py")
+    func_chunk = [c for c in chunks if c.get("node_type") == "function"][0]
+    assert func_chunk["metadata"]["is_async"] is True
+
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_nested_functions():
+    """Test that nested functions are NOT extracted as separate chunks."""
+    parser = TreeSitterParser(language="python")
+    code = """
+def outer():
+    def inner():
+        pass
+    return inner
+"""
+    chunks = parser.parse_code(code, file_path="/mock/path.py")
+    
+    # We should have a module chunk and the outer function chunk.
+    # No chunk should exist for the inner function alone.
+    func_chunks = [c for c in chunks if c.get("node_type") == "function"]
+    assert len(func_chunks) == 1
+    assert func_chunks[0]["metadata"]["func_name"] == "outer"
+    assert "def inner():" in func_chunks[0]["code_content"]
+
+
+@pytest.mark.skipif(TreeSitterParser is None, reason="TreeSitterParser not implemented")
+def test_tree_sitter_parser_class_headers_and_methods():
+    """Test class header skeletal signatures and recursive method extraction."""
+    parser = TreeSitterParser(language="python")
+    code = """
+class MyClass(Base):
+    \"\"\"Docstring.\"\"\"
+    def method_one(self):
+        pass
+    
+    @classmethod
+    def method_two(cls):
+        pass
+"""
+    chunks = parser.parse_code(code, file_path="/mock/path.py")
+    
+    # Extract class_header chunk
+    header_chunk = [c for c in chunks if c.get("node_type") == "class_header"][0]
+    expected_header = (
+        "class MyClass(Base):\n"
+        "    \"\"\"Docstring.\"\"\"\n"
+        "    def method_one(self)\n"
+        "        ...\n"
+        "    @classmethod\n"
+        "    def method_two(cls)\n"
+        "        ..."
+    )
+    assert header_chunk["code_content"] == expected_header
+    assert header_chunk["metadata"]["class_name"] == "MyClass"
+    assert header_chunk["metadata"]["base_classes"] == ["Base"]
+    
+    # Verify methods are extracted separately
+    methods = [c for c in chunks if c.get("node_type") == "method"]
+    assert len(methods) == 2
+    
+    method_names = [m["metadata"]["func_name"] for m in methods]
+    assert "method_one" in method_names
+    assert "method_two" in method_names
+    
+    for m in methods:
+        assert m["metadata"]["parent_class"] == "MyClass"
+
 
 
