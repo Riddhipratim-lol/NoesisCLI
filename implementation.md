@@ -35,7 +35,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Local ONNX Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
   * **Integration Notes:** Acts as the foundation for the Parallel Multi-Language Parser Pipeline (Phase 5). Chunks generated here are later enriched in Metadata Extractor (Phase 6.1) and BM25 indexing (Phase 3.1).
 
-### [ ] 1.3: Local ONNX Embedding Generator
+### [x] 1.3: Local ONNX Embedding Generator
 * **What it does:** Initializes the local `BAAI/bge-small-en-v1.5` embedding model via ONNX Runtime and generates embeddings in batches.
 * **What it takes (Inputs):**
   * A list of Code Chunk objects.
