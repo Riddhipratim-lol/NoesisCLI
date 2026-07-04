@@ -11,6 +11,8 @@ import sys
 import os
 from noesiscli.parser.scanner import RepositoryScanner
 from noesiscli.parser.tree_sitter_parser import TreeSitterParser
+from noesiscli.indexing.embedding import EmbeddingGenerator
+from noesiscli.indexing.vector_store import ChromaVectorStore
 
 def main():
     parser = argparse.ArgumentParser(description="NoesisCLI — Local Codebase Architect")
@@ -49,14 +51,44 @@ def main():
             all_chunks.extend(chunks)
             
         print(f"\nParsed {len(python_files)} Python files into {len(all_chunks)} semantic chunks.")
-        for chunk in all_chunks:
-            print(f" - [{chunk['node_type'].upper()}] {chunk['file_path']} (Lines {chunk['start_line']}-{chunk['end_line']})")
+        
+        if all_chunks:
+            # Generate embeddings
+            print("Generating embeddings using Voyage AI...")
+            embed_gen = EmbeddingGenerator()
+            embeddings = embed_gen.embed_chunks(all_chunks)
+            
+            # Save to ChromaDB
+            print("Indexing chunks into ChromaDB...")
+            db_path = os.path.join(repo_path, ".noesis", "chroma")
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            vector_store = ChromaVectorStore(persist_directory=db_path)
+            vector_store.add_chunks(all_chunks, embeddings)
+            print("Indexing completed successfully.")
             
         return all_chunks
         
     elif args.command == "query":
-        print(f"Querying: '{args.prompt}' (RAG query execution placeholder)")
-        return []
+        prompt = args.prompt
+        # Search for .noesis in current dir or parents
+        cwd = os.getcwd()
+        db_path = os.path.join(cwd, ".noesis", "chroma")
+        if not os.path.isdir(db_path):
+            print("Error: Noesis index not found. Please run 'noesiscli analyze <path>' first in this directory.", file=sys.stderr)
+            sys.exit(1)
+            
+        print(f"Retrieving context for query: '{prompt}'...")
+        vector_store = ChromaVectorStore(persist_directory=db_path)
+        results = vector_store.query(prompt, top_k=3)
+        
+        print(f"\nRetrieved {len(results)} relevant chunks:")
+        for idx, res in enumerate(results):
+            print(f"\n[{idx + 1}] {res.get('file_path')} (Lines {res.get('start_line')}-{res.get('end_line')})")
+            print("-" * 40)
+            print(res.get("code_content"))
+            print("-" * 40)
+            
+        return results
         
     else:
         parser.print_help()

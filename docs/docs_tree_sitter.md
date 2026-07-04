@@ -443,7 +443,7 @@ The Python Tree-sitter grammar wraps almost all statements in an `expression_sta
 
 | Downstream Phase | What it consumes |
 |---|---|
-| **Phase 1.3** ONNX Embedding Generator | `code_content`, `node_type`, `file_path` |
+| **Phase 1.3** Voyage AI Embedding Generator | `code_content`, `node_type`, `file_path` |
 | **Phase 1.4** ChromaDB Storage | All fields as document + metadata payload |
 | **Phase 3.1** BM25 Indexer | `code_content` tokenised for keyword index |
 | **Phase 4.1** Symbol Table Builder | `node_type`, `func_name`, `class_name`, `parent_class`, `start_line`, `end_line` |

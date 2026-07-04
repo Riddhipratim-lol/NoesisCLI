@@ -5,7 +5,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 ---
 
 ## [ ] Phase 1 — Core CLI & Base RAG Pipeline (Working Base Model)
-**Objective:** Build a minimal end-to-end local RAG pipeline to ingest a repository, parse Python code using Tree-sitter, compute local embeddings, store them in ChromaDB, retrieve relevant chunks, and stream answers from Gemini via a CLI interface.
+**Objective:** Build a minimal end-to-end local RAG pipeline to ingest a repository, parse Python code using Tree-sitter, compute embeddings using Voyage AI's API, store them in ChromaDB, retrieve relevant chunks, and stream answers from Gemini via a CLI interface.
 
 ### [x] 1.1: CLI Setup & Repository Ingestion
 * **What it does:** Establishes the basic CLI entry point and scans a local directory to find Python files, ignoring files matching standard patterns (like `.venv`, `__pycache__`, `.git`).
@@ -29,24 +29,36 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
     * `node_type`: `module`, `imports`, `class`, `class_header`, `method`, `function`, `constant`, `type_alias`, or `global`.
     * `start_line` / `end_line`: 1-indexed integers representing the position in the file.
     * `metadata`: Structured dictionary containing `decorators`, `is_async`, `parent_class`, `is_dunder`, `special_type`, `docstring`, and `imports_in_file`.
-* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Write AST traversals that handle `class_definition` (emitting both full `class` and signature-only `class_header` chunks), `function_definition` (detecting async functions by looking for an `async` child token), `decorated_definition` (resolving starts to ensure decorators are included in content), and `expression_statement` assignments to classify top-level declarations as `constant`, `type_alias`, or `global`. Aggregated import nodes (`import_statement`, `import_from_statement`) are parsed into a single dedicated `imports` chunk and also populated in the `imports_in_file` metadata list.
+* **Technical details:** Use `tree-sitter` and the `tree-sitter-python` grammar. Implement the following specialized strategies and bug fixes:
+  * **Strategies:**
+    * **[S1] Module-level chunking:** Emit a `module` chunk containing the file docstring, aggregated import list, and file-level metadata.
+    * **[S2] Class-header chunking:** Emit class signature + docstring + method signatures only (no bodies) as `class_header` chunks alongside full class chunks to provide context templates.
+    * **[S3] Global node classification:** Classify global nodes as `constant`, `type_alias`, or `global` based on their AST shape rather than lumping everything under `global`.
+    * **[S4] Per-chunk metadata:** Attaches decorator lists, `is_async` flags, `parent_class`, `is_dunder` flags, special type tags (e.g. `@property`, `@staticmethod`, `@classmethod`), docstrings, and file-level `imports_in_file` to every chunk.
+  * **Bug Fixes:**
+    * **[Fix 1] Decorated definitions:** Walk `decorated_definition` in `_extract_chunks_from_node` so decorator lines are always included in the extracted `code_content`.
+    * **[Fix 2] Import statement isolation:** Import statements do NOT flush global blocks; they are collected separately so they never cause unrelated global nodes to be fragmented.
+    * **[Fix 3] Per-file import collection:** Collect imports per-file so every chunk carries the file's import list for downstream phases like Phase 4 (Dependency Graph).
+    * **[Fix 4] Nested functions:** Do not recurse into nested functions from within a parent `function_definition` traversal path so they remain embedded in the parent's `code_content` and avoid duplication.
+    * **[Fix 5] Async functions:** Detect async functions by inspecting child tokens of a `function_definition` for the `async` keyword, ensuring no async structures are missed.
+    * **[Fix 6] Class body traversal:** Walk the explicit `block` child of a class definition rather than iterating all children, avoiding accidental double-traversal of name/colon/base-class nodes.
 * **Interconnections & Data Flow:**
   * **Inputs from:** List of file paths from CLI Setup & Ingestion (Phase 1.1).
-  * **Outputs to:** Local ONNX Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
+  * **Outputs to:** Voyage AI Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
   * **Integration Notes:** Acts as the foundation for the Parallel Multi-Language Parser Pipeline (Phase 5). Chunks generated here are later enriched in Metadata Extractor (Phase 6.1) and BM25 indexing (Phase 3.1).
 
-### [x] 1.3: Local ONNX Embedding Generator
-* **What it does:** Initializes the local `BAAI/bge-small-en-v1.5` embedding model via ONNX Runtime and generates embeddings in batches.
+### [x] 1.3: Voyage AI Embedding Generator
+* **What it does:** Generates embeddings in batches using Voyage AI's `voyage-code-3` API call model.
 * **What it takes (Inputs):**
   * A list of Code Chunk objects.
 * **What it returns (Outputs):**
   * A list of floating-point embedding vectors `List[List[float]]` corresponding to each chunk.
-* **Technical details:** Leverage ONNX Runtime (`onnxruntime`) and `transformers`/`tokenizers` (or standard `optimum`) to run embedding inference locally, avoiding external network calls.
+* **Technical details:** Use the `voyageai` client library or direct HTTP requests to call the Voyage AI embedding API, passing inputs in batches to maximize throughput.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2) or enriched summarized chunks (Phase 6.3) during ingestion. User queries (Phase 1.5 / Phase 3.2) during retrieval.
   * **Outputs to:** Dense Vector Storage (Phase 1.4) or Multi-Vector Indexing (Phase 6.3) to write code and summary embeddings.
 
-### [ ] 1.4: Dense Vector Storage (ChromaDB)
+### [x] 1.4: Dense Vector Storage (ChromaDB)
 * **What it does:** Initializes a local ChromaDB instance, creates/loads a collection, and indices the generated embeddings along with code content and basic metadata.
 * **What it takes (Inputs):**
   * List of Code Chunk objects and their generated embeddings.
@@ -54,7 +66,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A persistent ChromaDB database saved on disk under the repository's `.noesis/` directory.
 * **Technical details:** Use the `chromadb` client to manage a local SQLite-backed collection.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Embeddings from ONNX Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 6.3).
+  * **Inputs from:** Embeddings from Voyage AI Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 6.3).
   * **Outputs to:** Similarity search query results for Basic Retrieval (Phase 1.5) and Hybrid Retriever (Phase 3.2).
   * **Integration Notes:** Database lifetime and serialization on disk are managed by Directory & Persistence Manager (Phase 8.2).
 
@@ -152,7 +164,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Interconnections & Data Flow:**
   * **Inputs from:** User query from Router state (Phase 2.3), ChromaDB dense retriever (Phase 1.4/6.3), and BM25 lexical retriever (Phase 3.1/6.3).
   * **Outputs to:** Unified list of candidate chunks sent to Dependency Context Resolver (Phase 7.1).
-  * **Integration Notes:** Calls Local ONNX Embedding Generator (Phase 1.3) to generate query embeddings for the dense search branch.
+  * **Integration Notes:** Calls Voyage AI Embedding Generator (Phase 1.3) to generate query embeddings for the dense search branch.
 
 ---
 
@@ -248,7 +260,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Updated vector store (ChromaDB) and lexical store (BM25) containing the enriched details.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Enriched summarized chunks (Phase 6.2).
-  * **Outputs to:** Invokes Local ONNX Embedding Generator (Phase 1.3) to produce embeddings, then writes them to ChromaDB (Phase 1.4) and BM25 Index (Phase 3.1).
+  * **Outputs to:** Invokes Voyage AI Embedding Generator (Phase 1.3) to produce embeddings, then writes them to ChromaDB (Phase 1.4) and BM25 Index (Phase 3.1).
 
 ---
 

@@ -18,33 +18,18 @@ except ImportError:
     BM25Store = None
 
 
-@pytest.mark.skipif(EmbeddingGenerator is None, reason="EmbeddingGenerator not implemented")
-@patch("onnxruntime.InferenceSession")
-@patch("transformers.AutoTokenizer")
-def test_embedding_generator(mock_tokenizer, mock_session, mock_code_chunks):
-    """Test local ONNX embedding generator and verify batch outputs."""
-    # Setup mock tokenizer and session
-    mock_tok_instance = mock_tokenizer.from_pretrained.return_value
-    mock_tok_instance.return_value = {
-        "input_ids": MagicMock(),
-        "attention_mask": MagicMock()
-    }
+def test_embedding_generator(mock_code_chunks):
+    """Test Voyage AI embedding generator in offline/test mode."""
+    generator = EmbeddingGenerator(api_key="mock_key")
     
-    mock_sess_instance = mock_session.return_value
-    # Mocking output of ONNX run
-    import numpy as np
-    mock_sess_instance.run.return_value = [
-        np.random.rand(len(mock_code_chunks), 1, 384)  # shape (batch_size, seq_len, emb_dim)
-    ]
-    
-    generator = EmbeddingGenerator(model_name="BAAI/bge-small-en-v1.5", cache_dir=".noesis/models")
-    
-    texts = [c["code_content"] for c in mock_code_chunks]
-    embeddings = generator.generate(texts)
-    
-    assert isinstance(embeddings, list)
+    # Test batch embedding of chunks
+    embeddings = generator.embed_chunks(mock_code_chunks)
     assert len(embeddings) == len(mock_code_chunks)
-    assert len(embeddings[0]) == 384 or isinstance(embeddings[0], list)
+    assert len(embeddings[0]) == 1536
+    
+    # Test single query embedding
+    query_emb = generator.embed_query("auth service")
+    assert len(query_emb) == 1536
 
 
 @pytest.mark.skipif(ChromaVectorStore is None, reason="ChromaVectorStore not implemented")

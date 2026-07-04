@@ -8,7 +8,7 @@ Traditional Retrieval-Augmented Generation (RAG) systems treat source code as pl
 
 NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing with Tree-sitter. Instead of chunking code by character count, it understands programming language structure (supporting Python, JavaScript, TypeScript, Go, Java, and C++) and indexes complete functions, classes, methods, interfaces, and modules. To optimize ingestion performance, parsing is distributed in parallel across multiple CPU cores.
 
-During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains. It enriches chunks lacking documentation with AI-generated summaries and structured metadata, generating embeddings in batches using a local embedding model.
+During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains. It enriches chunks lacking documentation with AI-generated summaries and structured metadata, generating embeddings in batches using the Voyage AI API with the `voyage-code-3` model.
 
 Before executing any RAG pipeline components, NoesisCLI performs query validation to ensure the prompt is programming-related. Once validated, the query router determines whether the query requires repository analysis. General programming questions are answered directly, while repository-specific queries are routed through the RAG pipeline, avoiding unnecessary retrieval, reducing latency, and saving computational resources.
 
@@ -16,7 +16,7 @@ For repository-aware queries, NoesisCLI executes parallel semantic search (using
 
 To ensure robustness and low latency, the system utilizes a multi-model architecture. It leverages Gemini 3.5 Flash for complex reasoning and summarization tasks, and Gemini 3.1 Flash-Lite for rapid validation, routing, and fallback support (automatically falling back if rate limits or API failures occur on the primary model). Finally, explanations are streamed directly to the terminal in real-time.
 
-The entire system runs locally on the user's machine, making it suitable for private repositories while maintaining fast retrieval performance.
+The system uses local database storage and hybrid retrieval to maintain fast performance, combined with API-based embedding and LLM models.
 
 ---
 
@@ -261,6 +261,22 @@ Each parser extracts:
 - Docstrings (module-level, class-level, and function-level)
 - Decorators (retained and associated with classes/methods/functions)
 
+To ensure reliable, syntax-aware chunking without structural fragmentation, the Tree-sitter parser implements the following specialized strategies and bug fixes:
+
+### Applied Strategies
+- **[S1] Module-Level Chunking:** Emits a `module` chunk containing the file-level docstring, aggregated import list, and file-level metadata.
+- **[S2] Class-Header Chunking:** Emits a class signature header containing only the class definition, docstring, and method signatures (with bodies replaced by `...` placeholders) alongside the full `class` chunk. This acts as a skeletal context for pruning.
+- **[S3] Global Node Classification:** Classifies global nodes as `constant`, `type_alias`, or `global` based on AST shape rather than always lumping everything under `global`.
+- **[S4] Rich Per-Chunk Metadata:** Attaches decorator lists, `is_async` flags, `parent_class`, `is_dunder` flags, special type tags (e.g. `@property`, `@staticmethod`, `@classmethod`), docstrings, and file-level `imports_in_file` to every chunk.
+
+### Applied Bug Fixes
+- **[Fix 1] Decorator Line Inclusion:** Resolves start lines of decorated functions/classes using the `decorated_definition` wrapper to ensure decorator lines are included in the extracted `code_content`.
+- **[Fix 2] Import Statement Isolation:** Prevents import statements from being treated as flush triggers for global code blocks, preventing accidental fragmentation of global constructs.
+- **[Fix 3] Per-File Import Collection:** Collects import statements per-file so every chunk carries the file's import list to downstream dependency graph and retrieval phases.
+- **[Fix 4] Nested Functions Prevention:** Does not recurse into nested functions from within a parent `function_definition` to avoid duplicate chunks; they remain in the parent's `code_content` and are separately extracted only from class body/module traversal.
+- **[Fix 5] Async Function Detection:** Handles `async_function_definition` identically to `function_definition` by inspecting child tokens for the `async` keyword so async structures are never missed.
+- **[Fix 6] Class Body Traversal:** Walks the explicit `block` child of a class definition rather than iterating all children, avoiding double-traversal of name, colon, or base-class nodes.
+
 Rather than producing plain text, Tree-sitter generates an Abstract Syntax Tree representing the grammatical structure of each file.
 
 Example:
@@ -412,21 +428,20 @@ Each code chunk and generated summary is converted into dense vector embeddings.
 
 To maximize throughput, embeddings are generated in batches rather than one chunk at a time.
 
-The system uses a lightweight local embedding model such as:
+The system uses the API-based embedding model:
 
 ```
-BAAI/bge-small-en-v1.5
+voyage-code-3
 ```
 
-executed through ONNX Runtime.
+provided by Voyage AI.
 
 Advantages:
 
-- Runs locally
-- Low memory usage
-- Fast inference
-- No API cost
-- Privacy preserving
+- State-of-the-art code retrieval performance
+- Large context support for long code snippets
+- No local GPU/CPU inference overhead
+- Specialized for code and repository structure
 
 Each embedding represents the semantic meaning of the corresponding code chunk.
 
@@ -697,8 +712,8 @@ The total generation time remains similar, but the user receives information imm
 | Parallel Processing | multiprocessing |
 | Symbol Table | Custom Registry |
 | Dependency Graph | NetworkX |
-| Embedding Model | BAAI/bge-small-en-v1.5 |
-| Inference Engine | ONNX Runtime |
+| Embedding Model | Voyage AI voyage-code-3 |
+| Inference Engine | Voyage AI API (HTTP Client) |
 | Vector Database | ChromaDB |
 | Lexical Search | BM25 |
 | Hybrid Retrieval | Custom Rank Fusion |
@@ -718,11 +733,11 @@ The total generation time remains similar, but the user receives information imm
 - Parallel repository parsing using multiprocessing
 - Global Symbol Table and Dependency Graph for relationship tracing
 - Automatic metadata and summary generation
-- Batch embedding generation with local ONNX models
+- Batch embedding generation using Voyage AI API (voyage-code-3)
 - Hybrid retrieval using dense vectors and BM25
 - Context-aware prompt pruning
 - Streaming LLM responses
-- Local-first architecture with full repository privacy
+- Local-first architecture with local database storage and hybrid retrieval
 - Efficient token usage and reduced inference latency
 
 ---
