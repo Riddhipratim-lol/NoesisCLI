@@ -4,7 +4,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 1 — Core CLI & Base RAG Pipeline (Working Base Model)
+## [x] Phase 1 — Core CLI & Base RAG Pipeline (Working Base Model)
 **Objective:** Build a minimal end-to-end local RAG pipeline to ingest a repository, parse Python code using Tree-sitter, compute embeddings using Voyage AI's API, store them in ChromaDB, retrieve relevant chunks, and stream answers from Gemini via a CLI interface.
 
 ### [x] 1.1: CLI Setup & Repository Ingestion
@@ -70,7 +70,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Similarity search query results for Basic Retrieval (Phase 1.5) and Hybrid Retriever (Phase 3.2).
   * **Integration Notes:** Database lifetime and serialization on disk are managed by Directory & Persistence Manager (Phase 8.2).
 
-### [ ] 1.5: Basic Retrieval & LLM reasoning (Gemini)
+### [x] 1.5: Basic Retrieval & LLM reasoning (Gemini)
 * **What it does:** Converts a user query into an embedding, performs a similarity search in ChromaDB, builds a prompt containing the retrieved context, and queries Gemini 3.5 Flash to stream the response.
 * **What it takes (Inputs):**
   * User query string.

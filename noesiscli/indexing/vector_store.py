@@ -90,6 +90,7 @@ class ChromaVectorStore:
         """
         # Determine the dimension of the embeddings in the collection
         dim = self.dimension
+        # Fetches one stored embedding to get the dimension
         if dim is None:
             try:
                 existing = self.collection.get(limit=1, include=["embeddings"])

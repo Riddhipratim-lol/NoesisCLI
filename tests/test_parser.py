@@ -301,4 +301,40 @@ class MyClass(Base):
         assert m["metadata"]["parent_class"] == "MyClass"
 
 
+@patch("noesiscli.cli.ChromaVectorStore")
+@patch("noesiscli.models.client.GeminiClient")
+@patch("os.path.isdir", return_value=True)
+def test_cli_query(mock_isdir, mock_gemini_client_class, mock_chroma_store_class):
+    """Test that CLI query command retrieves context and calls Gemini stream."""
+    from noesiscli.cli import main
+    
+    # Mock vector store
+    mock_store = mock_chroma_store_class.return_value
+    mock_store.query.return_value = [
+        {
+            "code_content": "def test_func(): pass",
+            "file_path": "/mock/test.py",
+            "start_line": 1,
+            "end_line": 2,
+            "node_type": "function"
+        }
+    ]
+    
+    # Mock GeminiClient
+    mock_gemini = mock_gemini_client_class.return_value
+    mock_gemini.stream.return_value = ["Test ", "Stream ", "Response"]
+    
+    # Run CLI query
+    with patch("sys.argv", ["noesiscli", "query", "How does test_func work?"]):
+        results = main()
+        
+        # Assertions
+        assert results is not None
+        assert len(results) == 1
+        assert results[0]["code_content"] == "def test_func(): pass"
+        
+        mock_store.query.assert_called_once_with("How does test_func work?", top_k=3)
+        mock_gemini.stream.assert_called_once()
+
+
 

@@ -88,6 +88,48 @@ def main():
             print(res.get("code_content"))
             print("-" * 40)
             
+        if results:
+            print("\nReasoning over retrieved context...")
+            # Build prompt
+            context_parts = []
+            for idx, chunk in enumerate(results):
+                file_path = chunk.get("file_path", "unknown")
+                start_line = chunk.get("start_line", 0)
+                end_line = chunk.get("end_line", 0)
+                node_type = chunk.get("node_type", "unknown")
+                code_content = chunk.get("code_content", "")
+                
+                context_part = (
+                    f"File: {file_path} (Lines {start_line}-{end_line}, Type: {node_type})\n"
+                    f"```python\n{code_content}\n```"
+                )
+                context_parts.append(context_part)
+                
+            context_str = "\n\n".join(context_parts)
+            
+            system_instruction = (
+                "You are Antigravity, a professional AI coding assistant and codebase architect.\n"
+                "Your task is to answer the user's programming questions or repository analysis queries using the provided code context.\n"
+                "Base your answer on the provided code context. If the context does not contain the answer, "
+                "provide the best answer possible while indicating the limitations of the provided context."
+            )
+            
+            llm_prompt = f"Code Context:\n{context_str}\n\nUser Query: {prompt}"
+            
+            from noesiscli.models.client import GeminiClient
+            client = GeminiClient()
+            
+            print("\nResponse:")
+            try:
+                for chunk in client.stream(llm_prompt, system_instruction=system_instruction):
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
+                print()
+            except Exception as e:
+                print(f"\nError generating response: {e}", file=sys.stderr)
+        else:
+            print("\nNo relevant context found. Cannot reason without context.")
+            
         return results
         
     else:
