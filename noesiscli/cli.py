@@ -108,7 +108,7 @@ def main():
             context_str = "\n\n".join(context_parts)
             
             system_instruction = (
-                "You are Antigravity, a professional AI coding assistant and codebase architect.\n"
+                "You are NoesisCLI, a professional AI coding assistant and codebase architect.\n"
                 "Your task is to answer the user's programming questions or repository analysis queries using the provided code context.\n"
                 "Base your answer on the provided code context. If the context does not contain the answer, "
                 "provide the best answer possible while indicating the limitations of the provided context."

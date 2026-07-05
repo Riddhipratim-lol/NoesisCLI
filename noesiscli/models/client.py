@@ -40,7 +40,8 @@ class GeminiClient:
         self.api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if self.api_key:
             os.environ["GOOGLE_API_KEY"] = self.api_key
-            
+
+        # lazy initialization (Takes time to delay until the first request)    
         self._primary_llm = None
         self._fallback_llm = None
 
