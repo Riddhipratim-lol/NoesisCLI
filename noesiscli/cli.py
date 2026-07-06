@@ -77,60 +77,31 @@ def main():
             print("Error: Noesis index not found. Please run 'noesiscli analyze <path>' first in this directory.", file=sys.stderr)
             sys.exit(1)
             
-        print(f"Retrieving context for query: '{prompt}'...")
         vector_store = ChromaVectorStore(persist_directory=db_path)
-        results = vector_store.query(prompt, top_k=3)
         
-        print(f"\nRetrieved {len(results)} relevant chunks:")
-        for idx, res in enumerate(results):
-            print(f"\n[{idx + 1}] {res.get('file_path')} (Lines {res.get('start_line')}-{res.get('end_line')})")
-            print("-" * 40)
-            print(res.get("code_content"))
-            print("-" * 40)
+        from noesiscli.models.client import GeminiClient
+        from noesiscli.pipeline.graph import WorkflowGraph
+        
+        client = GeminiClient()
+        wf_graph = WorkflowGraph(llm_client=client, retriever=vector_store)
+        graph = wf_graph.compile()
+        
+        initial_state = {
+            "query": prompt,
+            "is_valid": None,
+            "route": None,
+            "context_chunks": [],
+            "response": "",
+            "feedback": None
+        }
+        
+        final_state = graph.invoke(initial_state)
+        
+        if not final_state.get("is_valid"):
+            print(f"\n[Validation Failed] {final_state.get('feedback')}", file=sys.stderr)
+            return []
             
-        if results:
-            print("\nReasoning over retrieved context...")
-            # Build prompt
-            context_parts = []
-            for idx, chunk in enumerate(results):
-                file_path = chunk.get("file_path", "unknown")
-                start_line = chunk.get("start_line", 0)
-                end_line = chunk.get("end_line", 0)
-                node_type = chunk.get("node_type", "unknown")
-                code_content = chunk.get("code_content", "")
-                
-                context_part = (
-                    f"File: {file_path} (Lines {start_line}-{end_line}, Type: {node_type})\n"
-                    f"```python\n{code_content}\n```"
-                )
-                context_parts.append(context_part)
-                
-            context_str = "\n\n".join(context_parts)
-            
-            system_instruction = (
-                "You are NoesisCLI, a professional AI coding assistant and codebase architect.\n"
-                "Your task is to answer the user's programming questions or repository analysis queries using the provided code context.\n"
-                "Base your answer on the provided code context. If the context does not contain the answer, "
-                "provide the best answer possible while indicating the limitations of the provided context."
-            )
-            
-            llm_prompt = f"Code Context:\n{context_str}\n\nUser Query: {prompt}"
-            
-            from noesiscli.models.client import GeminiClient
-            client = GeminiClient()
-            
-            print("\nResponse:")
-            try:
-                for chunk in client.stream(llm_prompt, system_instruction=system_instruction):
-                    sys.stdout.write(chunk)
-                    sys.stdout.flush()
-                print()
-            except Exception as e:
-                print(f"\nError generating response: {e}", file=sys.stderr)
-        else:
-            print("\nNo relevant context found. Cannot reason without context.")
-            
-        return results
+        return final_state.get("context_chunks", [])
         
     else:
         parser.print_help()

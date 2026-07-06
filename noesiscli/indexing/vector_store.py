@@ -169,3 +169,10 @@ class ChromaVectorStore:
                 retrieved_chunks.append(chunk)
                 
         return retrieved_chunks
+
+    def retrieve(self, query_str: str, top_k: int = 3) -> list[dict]:
+        """
+        Satisfies the retriever interface by wrapping self.query.
+        """
+        return self.query(query_str, top_k=top_k)
+

@@ -85,10 +85,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 2 — Workflow Orchestration, Validation, & Routing (LangGraph)
+## [x] Phase 2 — Workflow Orchestration, Validation, & Routing (LangGraph)
 **Objective:** Orchestrate the application workflow using LangGraph, incorporating security/usefulness validation and query routing before invoking any RAG pipeline components.
 
-### [ ] 2.1: LangGraph Workflow Setup
+### [x] 2.1: LangGraph Workflow Setup
 * **What it does:** Creates a state machine representing the lifecycle of NoesisCLI queries (Validation Node -> Router Node -> Direct LLM Node / RAG Pipeline Node).
 * **What it takes (Inputs):**
   * A state dictionary containing `query`, `is_valid`, `route`, `context_chunks`, and `response`.
@@ -99,7 +99,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** CLI User Interface (Phase 8.3) passing the raw query.
   * **Outputs to:** Controls and dispatches the execution flow to Query Validation (Phase 2.2), Query Router (Phase 2.3), Direct Responder (Phase 2.4), Hybrid Retriever (Phase 3.2), Context Pruner (Phase 7.3), and LLM Reasoner (Phase 8.1).
 
-### [ ] 2.2: Query Validation Layer
+### [x] 2.2: Query Validation Layer
 * **What it does:** Evaluates the incoming prompt using Gemini 3.1 Flash-Lite to confirm that the query is programming-related or repository-related.
 * **What it takes (Inputs):**
   * Raw user prompt.
@@ -112,19 +112,19 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Validation results state update (`is_valid`) in LangGraph. If validation fails, triggers response feedback printing in CLI (Phase 8.3).
   * **Integration Notes:** Dispatches all API requests through the central Fail-safe LLM Client (Phase 8.1).
 
-### [ ] 2.3: Intelligent Query Router
+### [x] 2.3: Intelligent Query Router
 * **What it does:** Categorizes valid coding queries into two paths: General Coding (answered directly) and Repository-Specific (requires RAG pipeline).
 * **What it takes (Inputs):**
   * Valid user query.
 * **What it returns (Outputs):**
   * A routing flag: `"direct_llm"` or `"repository_rag"`.
-* **Technical details:** Use Gemini 3.1 Flash-Lite to classify the query. For example, "What is encapsulation?" goes to `direct_llm`, whereas "Where is the DB configured?" goes to `repository_rag`.
+  * **Technical details:** Use Gemini 3.1 Flash-Lite to classify the query. For example, "What is encapsulation?" goes to `direct_llm`, whereas "Where is the DB configured?" goes to `repository_rag`.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Verified query from State after Query Validation (Phase 2.2) succeeds.
   * **Outputs to:** Controls the conditional edge route in LangGraph: routing to Direct LLM Responder (Phase 2.4) or Hybrid Retriever (Phase 3.2).
   * **Integration Notes:** Performs model queries via the Fail-safe LLM Client (Phase 8.1).
 
-### [ ] 2.4: Direct LLM Route Execution
+### [x] 2.4: Direct LLM Route Execution
 * **What it does:** Implements the fast direct answer path for general questions using Gemini 3.1 Flash-Lite, saving the system from searching ChromaDB or loading code.
 * **What it takes (Inputs):**
   * General programming query.

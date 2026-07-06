@@ -319,9 +319,11 @@ def test_cli_query(mock_isdir, mock_gemini_client_class, mock_chroma_store_class
             "node_type": "function"
         }
     ]
+    mock_store.retrieve.side_effect = lambda q, top_k=3: mock_store.query(q, top_k=top_k)
     
     # Mock GeminiClient
     mock_gemini = mock_gemini_client_class.return_value
+    mock_gemini.generate.side_effect = ["True", "repository_rag"]
     mock_gemini.stream.return_value = ["Test ", "Stream ", "Response"]
     
     # Run CLI query

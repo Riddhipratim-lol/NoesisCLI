@@ -66,6 +66,36 @@ def test_query_validator(mock_gemini_client):
     assert validator.validate("What is the weather today?") is False
 
 
+@pytest.mark.skipif(QueryValidator is None, reason="QueryValidator not implemented")
+@patch("noesiscli.models.client.GeminiClient")
+def test_query_validator_validate_and_route(mock_gemini_client):
+    """Test that validate_and_route classifies queries correctly in one step."""
+    mock_instance = mock_gemini_client.return_value
+    mock_instance.generate.side_effect = ["repository_rag", "direct_llm", "invalid", "True", "repository_rag"]
+    
+    validator = QueryValidator(llm_client=mock_instance)
+    
+    # 1. repository_rag
+    is_valid, route = validator.validate_and_route("Explain the database configuration")
+    assert is_valid is True
+    assert route == "repository_rag"
+    
+    # 2. direct_llm
+    is_valid, route = validator.validate_and_route("What is a class?")
+    assert is_valid is True
+    assert route == "direct_llm"
+    
+    # 3. invalid
+    is_valid, route = validator.validate_and_route("What is the weather today?")
+    assert is_valid is False
+    assert route == "invalid"
+
+    # 4. Backward-compatible "True" response which should trigger a fallback router call
+    is_valid, route = validator.validate_and_route("How do I code?")
+    assert is_valid is True
+    assert route == "repository_rag"
+
+
 @pytest.mark.skipif(QueryRouter is None, reason="QueryRouter not implemented")
 @patch("noesiscli.models.client.GeminiClient")
 def test_query_router(mock_gemini_client):
