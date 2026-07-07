@@ -96,7 +96,7 @@ Every chunk dict has this guaranteed shape:
 | `module` | File-level overview: docstring + all imports | Entire file header |
 | `imports` | All import statements aggregated into one chunk | `import os`, `from x import y` |
 | `class` | Full class body including all method implementations | `class Foo(Bar): ...` |
-| `class_header` | Skeletal class: signature + docstring + method signatures only | Ready for Phase 7 context pruner |
+| `class_header` | Skeletal class: signature + docstring + method signatures only | Ready for Phase 6 context pruner |
 | `method` | A single method extracted from a class body | `def authenticate(self, ...)` |
 | `function` | A top-level (module-level) function | `def standalone(x): ...` |
 | `constant` | Top-level ALL_CAPS assignment | `MAX_RETRIES = 5` |
@@ -415,7 +415,7 @@ The parser emits these chunks in order:
 
 ### Why emit both `class` and `class_header`?
 
-The `class` chunk feeds the **embedding + BM25 index** with full implementation detail. The `class_header` chunk is a pre-built skeletal view for Phase 7's **Context Pruner**, which needs to replace non-retrieved method bodies with `...` placeholders. Computing the header at parse time avoids re-parsing at retrieval time.
+The `class` chunk feeds the **embedding + BM25 index** with full implementation detail. The `class_header` chunk is a pre-built skeletal view for Phase 6's **Context Pruner** (Code Structure Pruner), which needs to replace non-retrieved method bodies with `...` placeholders. Computing the header at parse time avoids re-parsing at retrieval time.
 
 ### Why are nested functions NOT extracted separately?
 
@@ -448,8 +448,7 @@ The Python Tree-sitter grammar wraps almost all statements in an `expression_sta
 | **Phase 3.1** BM25 Indexer | `code_content` tokenised for keyword index |
 | **Phase 4.1** Symbol Table Builder | `node_type`, `func_name`, `class_name`, `parent_class`, `start_line`, `end_line` |
 | **Phase 4.2** Dependency Graph | `node_type == "imports"`, `imports_parsed` |
-| **Phase 6.1** Metadata Extractor | Full chunk dict enriched with additional fields |
-| **Phase 7.2** Context Pruner | `class_header` chunks used as pruning templates |
+| **Phase 6.2** Code Structure Pruner | `class_header` chunks used as pruning templates |
 
 ---
 

@@ -1,6 +1,6 @@
 # NoesisCLI Implementation Plan
 
-This document outlines the step-by-step implementation plan for **NoesisCLI**, a local AI-powered codebase architect. The implementation is divided into logical phases, starting with a working base model in Phase 1, followed by adding orchestration, search improvements, relationship tracking, parallelization, metadata enrichment, context optimization, and final robust fallbacks.
+This document outlines the step-by-step implementation plan for **NoesisCLI**, a local AI-powered codebase architect. The implementation is divided into logical phases, starting with a working base model in Phase 1, followed by adding orchestration, search improvements, relationship tracking, parallelization, context optimization, and final robust fallbacks.
 
 ---
 
@@ -45,7 +45,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Interconnections & Data Flow:**
   * **Inputs from:** List of file paths from CLI Setup & Ingestion (Phase 1.1).
   * **Outputs to:** Voyage AI Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
-  * **Integration Notes:** Acts as the foundation for the Parallel Multi-Language Parser Pipeline (Phase 5). Chunks generated here are later enriched in Metadata Extractor (Phase 6.1) and BM25 indexing (Phase 3.1).
+  * **Integration Notes:** Acts as the foundation for the Parallel Multi-Language Parser Pipeline (Phase 5) and BM25 indexing (Phase 3.1).
 
 ### [x] 1.3: Voyage AI Embedding Generator
 * **What it does:** Generates embeddings in batches using Voyage AI's `voyage-code-3` API call model.
@@ -55,8 +55,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A list of floating-point embedding vectors `List[List[float]]` corresponding to each chunk.
 * **Technical details:** Use the `voyageai` client library or direct HTTP requests to call the Voyage AI embedding API, passing inputs in batches to maximize throughput.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2) or enriched summarized chunks (Phase 6.3) during ingestion. User queries (Phase 1.5 / Phase 3.2) during retrieval.
-  * **Outputs to:** Dense Vector Storage (Phase 1.4) or Multi-Vector Indexing (Phase 6.3) to write code and summary embeddings.
+  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2) during ingestion. User queries (Phase 1.5 / Phase 3.2) during retrieval.
+  * **Outputs to:** Dense Vector Storage (Phase 1.4) to write code embeddings.
 
 ### [x] 1.4: Dense Vector Storage (ChromaDB)
 * **What it does:** Initializes a local ChromaDB instance, creates/loads a collection, and indices the generated embeddings along with code content and basic metadata.
@@ -66,9 +66,9 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A persistent ChromaDB database saved on disk under the repository's `.noesis/` directory.
 * **Technical details:** Use the `chromadb` client to manage a local SQLite-backed collection.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Embeddings from Voyage AI Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 6.3).
+  * **Inputs from:** Embeddings from Voyage AI Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 5.2).
   * **Outputs to:** Similarity search query results for Basic Retrieval (Phase 1.5) and Hybrid Retriever (Phase 3.2).
-  * **Integration Notes:** Database lifetime and serialization on disk are managed by Directory & Persistence Manager (Phase 8.2).
+  * **Integration Notes:** Database lifetime and serialization on disk are managed by Directory & Persistence Manager (Phase 7.2).
 
 ### [x] 1.5: Basic Retrieval & LLM reasoning (Gemini)
 * **What it does:** Converts a user query into an embedding, performs a similarity search in ChromaDB, builds a prompt containing the retrieved context, and queries Gemini 3.5 Flash to stream the response.
@@ -80,8 +80,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Technical details:** Integrate LangChain's Gemini bindings (`langchain-google-genai`) and enable streaming callbacks to print tokens as they arrive.
 * **Interconnections & Data Flow:**
   * **Inputs from:** User query (Phase 1.1) and ChromaDB search query results (Phase 1.4).
-  * **Outputs to:** Direct CLI terminal printing (Phase 8.3).
-  * **Integration Notes:** This prototype is fully replaced by the LangGraph Workflow Orchestration (Phase 2), Hybrid Retrieval (Phase 3), Context Pruning (Phase 7), and Fail-safe LLM Client (Phase 8.1) in the final setup.
+  * **Outputs to:** Direct CLI terminal printing (Phase 7.3).
+  * **Integration Notes:** This prototype is fully replaced by the LangGraph Workflow Orchestration (Phase 2), Hybrid Retrieval (Phase 3), Context Pruning (Phase 6), and Fail-safe LLM Client (Phase 7.1) in the final setup.
 
 ---
 
@@ -129,8 +129,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Streamed response answering the general coding question.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Router decision in state (Phase 2.3) when set to `"direct_llm"`.
-  * **Outputs to:** Streams response tokens directly to CLI Layer (Phase 8.3).
-  * **Integration Notes:** Communicates with Gemini 3.1 Flash-Lite using the Fail-safe LLM Client (Phase 8.1).
+  * **Outputs to:** Streams response tokens directly to CLI Layer (Phase 7.3).
+  * **Integration Notes:** Communicates with Gemini 3.1 Flash-Lite using the Fail-safe LLM Client (Phase 7.1).
 
 
 ---
@@ -146,8 +146,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A serialized BM25 index file stored in `.noesis/bm25.pkl`.
 * **Technical details:** Use a library like `rank_bm25` or build a custom BM25 index. Use python's `pickle` or a dedicated library to save/load it.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2 / Phase 6.3).
-  * **Outputs to:** Saved BM25 index persisted/loaded via Directory Manager (Phase 8.2), and lexical match lookups evaluated in Hybrid Retriever (Phase 3.2).
+  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2).
+  * **Outputs to:** Saved BM25 index persisted/loaded via Directory Manager (Phase 7.2), and lexical match lookups evaluated in Hybrid Retriever (Phase 3.2).
 
 ### [ ] 3.2: Hybrid Retriever with Rank Fusion
 * **What it does:** Executes semantic search (ChromaDB) and lexical search (BM25) in parallel, and merges the retrieved chunks using a fusion algorithm.
@@ -160,8 +160,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   $$RRF(d) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$ 
   where $r_m(d)$ is the rank of document $d$ in retriever $m$, and $k$ is a constant (commonly 60). De-duplicate chunks that appear in both retrievals based on file paths and line ranges.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** User query from LangGraph State (Phase 2.1), ChromaDB dense retriever (Phase 1.4/6.3), and BM25 lexical retriever (Phase 3.1/6.3).
-  * **Outputs to:** Unified list of candidate chunks sent to Dependency Context Resolver (Phase 7.1).
+  * **Inputs from:** User query from LangGraph State (Phase 2.1), ChromaDB dense retriever (Phase 1.4), and BM25 lexical retriever (Phase 3.1).
+  * **Outputs to:** Unified list of candidate chunks sent to Dependency Context Resolver (Phase 6.1).
   * **Integration Notes:** Calls Voyage AI Embedding Generator (Phase 1.3) to generate query embeddings for the dense search branch.
 
 ---
@@ -178,8 +178,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Technical details:** Walk the parsed code chunks (filtering by `class`, `method`, and `function` types) to capture signatures, enclosing scopes, and line locations. Write a fast-lookup data structure that can search symbols by name (case-sensitive and case-insensitive).
 * **Interconnections & Data Flow:**
   * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2).
-  * **Outputs to:** In-memory references used by Dependency Graph Constructor (Phase 4.2), Metadata Extractor (Phase 6.1), and Dependency Context Resolver (Phase 7.1).
-  * **Integration Notes:** Saved and loaded from the `.noesis/` directory via Directory & Persistence Manager (Phase 8.2).
+  * **Outputs to:** In-memory references used by Dependency Graph Constructor (Phase 4.2) and Dependency Context Resolver (Phase 6.1).
+  * **Integration Notes:** Saved and loaded from the `.noesis/` directory via Directory & Persistence Manager (Phase 7.2).
 
 ### [ ] 4.2: Codebase Dependency Graph Constructor
 * **What it does:** Scans imports and function call patterns, creating connections between files and symbols across the entire repository.
@@ -191,8 +191,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Technical details:** Use `networkx` to build and query the graph. Scan the aggregated `imports` chunks to map out file-to-file import relationships. For each function and class chunk, search for function calls/method invocation patterns that match symbols in the global Symbol Table to map out granular dependency edges.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2) and Global Symbol Table (Phase 4.1).
-  * **Outputs to:** Metadata Extractor (Phase 6.1) for dependency counting, and Dependency Context Resolver (Phase 7.1) for relational search.
-  * **Integration Notes:** Serialized on disk and restored on start by Directory & Persistence Manager (Phase 8.2).
+  * **Outputs to:** Dependency Context Resolver (Phase 6.1) for relational search.
+  * **Integration Notes:** Serialized on disk and restored on start by Directory & Persistence Manager (Phase 7.2).
 
 ---
 
@@ -220,52 +220,15 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Technical details:** Implement a worker function that receives a file path, parses it using the Tree-sitter parser to extract structured Code Chunks, and returns them. Use `multiprocessing.Pool` or `concurrent.futures.ProcessPoolExecutor` with batching to minimize process communication overhead.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Ingestion file list (Phase 1.1) and parser configurations (Phase 5.1).
-  * **Outputs to:** Feeds aggregated parsing data to Symbol Table Builder (Phase 4.1), Dependency Graph Constructor (Phase 4.2), and Semantic Chunker (Phase 1.2/6.1).
+  * **Outputs to:** Feeds aggregated parsing data to Symbol Table Builder (Phase 4.1), Dependency Graph Constructor (Phase 4.2), and Semantic Chunker (Phase 1.2).
   * **Integration Notes:** Standardizes the high-throughput parallel ingestion pipeline of NoesisCLI.
 
 ---
 
-## [ ] Phase 6 — Metadata Enrichment & AI-Powered Summary Generation
-**Objective:** Generate rich metadata and automatically write descriptions for code segments lacking documentation using Gemini.
-
-### [ ] 6.1: Metadata Extractor
-* **What it does:** Computes and attaches structural metadata for each code chunk (e.g., arguments, return values, visibility, parent classes, and outgoing dependencies from the Dependency Graph).
-* **What it takes (Inputs):**
-  * Code Chunks, Global Symbol Table, and Dependency Graph.
-* **What it returns (Outputs):**
-  * Code Chunks enriched with a structured `metadata` property containing functional properties.
-* **Interconnections & Data Flow:**
-  * **Inputs from:** AST Code Chunks (Phase 1.2 / Phase 5.2), Global Symbol Table (Phase 4.1), and Dependency Graph (Phase 4.2).
-  * **Outputs to:** Enriched chunks fed to Gemini Summary Generator (Phase 6.2).
-
-### [ ] 6.2: Gemini Summary Generator (with Fallback)
-* **What it does:** Identifies chunks that are missing docstrings or comments. Prompts Gemini 3.5 Flash to generate a short, high-quality description of the chunk's purpose. If Gemini 3.5 Flash fails or is rate-limited, it automatically falls back to Gemini 3.1 Flash-Lite.
-* **What it takes (Inputs):**
-  * Code Chunk source code and metadata.
-* **What it returns (Outputs):**
-  * A short text summary of the code chunk.
-* **Technical details:** Build a robust API invocation block. Prompt the LLM to write a 1-2 sentence functional summary of what the class or function does.
-* **Interconnections & Data Flow:**
-  * **Inputs from:** Enriched Code Chunks with structural metadata (Phase 6.1).
-  * **Outputs to:** Multi-Vector Indexing (Phase 6.3) to associate generated summaries with code chunks.
-  * **Integration Notes:** Calls Gemini models via the Fail-safe LLM Client (Phase 8.1) for exception handling and quota mitigation.
-
-### [ ] 6.3: Multi-Vector Indexing (Code + Summaries)
-* **What it does:** Generates embeddings for both the raw code content and the generated summaries/metadata, indexing them in ChromaDB and BM25 to allow queries to match either the exact code syntax or the semantic summary.
-* **What it takes (Inputs):**
-  * Enriched Code Chunks (containing raw code, metadata, and summary).
-* **What it returns (Outputs):**
-  * Updated vector store (ChromaDB) and lexical store (BM25) containing the enriched details.
-* **Interconnections & Data Flow:**
-  * **Inputs from:** Enriched summarized chunks (Phase 6.2).
-  * **Outputs to:** Invokes Voyage AI Embedding Generator (Phase 1.3) to produce embeddings, then writes them to ChromaDB (Phase 1.4) and BM25 Index (Phase 3.1).
-
----
-
-## [ ] Phase 7 — Context-Aware Pruning & Prompt Construction
+## [ ] Phase 6 — Context-Aware Pruning & Prompt Construction
 **Objective:** Optimize LLM token usage and reasoning accuracy by replacing irrelevant function implementations in retrieved files with signatures/placeholders.
 
-### [ ] 7.1: Dependency Context Resolver
+### [ ] 6.1: Dependency Context Resolver
 * **What it does:** Inspects the retrieved candidate chunks. Using the Symbol Table and Dependency Graph, it identifies related definitions (e.g., parent classes, helper functions called in the candidate chunk, or interfaces implemented) that are essential for understanding the retrieved code.
 * **What it takes (Inputs):**
   * Ranked retrieved Code Chunks.
@@ -275,9 +238,9 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A set of target symbols (to keep fully implemented) and a set of reference symbols (to include as signatures).
 * **Interconnections & Data Flow:**
   * **Inputs from:** Chunks retrieved via Hybrid Retriever (Phase 3.2), Global Symbol Table (Phase 4.1), and Dependency Graph (Phase 4.2).
-  * **Outputs to:** Targeted lists of full-implementation and signature-only symbols sent to Code Structure Pruner (Phase 7.2).
+  * **Outputs to:** Targeted lists of full-implementation and signature-only symbols sent to Code Structure Pruner (Phase 6.2).
 
-### [ ] 7.2: Code Structure Pruner
+### [ ] 6.2: Code Structure Pruner
 * **What it does:** Reconstructs the skeletal structure of files containing the retrieved code, keeping full implementation detail only for the targeted symbols, and replacing all other non-essential classes/methods with signatures or `...` placeholders.
 * **What it takes (Inputs):**
   * Source code files.
@@ -287,36 +250,36 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Pruned code blocks representing the codebase structures.
 * **Technical details:** Leverage pre-computed `class_header` chunks when generating the skeletal/signature-only representations of unretrieved reference classes, and surgically replace method bodies in retrieved modules using Tree-sitter.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Target/reference lists (Phase 7.1) and raw source files (Phase 1.1). Leverages Tree-sitter parsers (Phase 1.2 / Phase 5.1).
-  * **Outputs to:** Skeletal pruned code context blocks sent to Prompt Constructor (Phase 7.3).
+  * **Inputs from:** Target/reference lists (Phase 6.1) and raw source files (Phase 1.1). Leverages Tree-sitter parsers (Phase 1.2 / Phase 5.1).
+  * **Outputs to:** Skeletal pruned code context blocks sent to Prompt Constructor (Phase 6.3).
 
-### [ ] 7.3: Prompt Constructor
-* **What it does:** Assembles the context-optimized prompt containing the pruned code files, active dependency relationships, symbol definitions, file locations, metadata, summaries, and the user's original query.
+### [ ] 6.3: Prompt Constructor
+* **What it does:** Assembles the context-optimized prompt containing the pruned code files, active dependency relationships, symbol definitions, file locations, metadata, and the user's original query.
 * **What it takes (Inputs):**
   * Pruned code blocks, metadata, and user query.
 * **What it returns (Outputs):**
   * A populated prompt ready for the LLM.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Pruned code blocks (Phase 7.2), metadata summaries (Phase 6.1/6.2), and user query from LangGraph State (Phase 2.1).
-  * **Outputs to:** Dispatches populated prompt to LLM Reasoner (Phase 8.1) inside the LangGraph workflow node.
+  * **Inputs from:** Pruned code blocks (Phase 6.2), basic chunk metadata (Phase 1.2), and user query from LangGraph State (Phase 2.1).
+  * **Outputs to:** Dispatches populated prompt to LLM Reasoner (Phase 7.1) inside the LangGraph workflow node.
 
 ---
 
-## [ ] Phase 8 — Robust Multi-Model Fallbacks & System Polish
+## [ ] Phase 7 — Robust Multi-Model Fallbacks & System Polish
 **Objective:** Finalize the CLI commands, implement robust client-side retry/fallback logic, serialize graphs, and optimize the overall CLI user experience.
 
-### [ ] 8.1: Fail-safe LLM Client
-* **What it does:** Wraps all Gemini API calls (summaries, reasoning) in a client that detects errors (network failure, rate limit, quota exceeded) on Gemini 3.5 Flash and automatically routes the request to Gemini 3.1 Flash-Lite.
+### [ ] 7.1: Fail-safe LLM Client
+* **What it does:** Wraps all Gemini API calls (reasoning) in a client that detects errors (network failure, rate limit, quota exceeded) on Gemini 3.5 Flash and automatically routes the request to Gemini 3.1 Flash-Lite.
 * **What it takes (Inputs):**
   * API payload (messages, parameters).
 * **What it returns (Outputs):**
   * LLM response stream or text object.
 * **Technical details:** Wrap the LangChain execution in try-except blocks, handling API errors and switching model endpoints dynamically.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Direct responder (Phase 2.4), Summary generator (Phase 6.2), and Prompt Constructor (Phase 7.3).
-  * **Outputs to:** Returns response text (summaries) or dispatches streamed response tokens to CLI Layer (Phase 8.3).
+  * **Inputs from:** Direct responder (Phase 2.4) and Prompt Constructor (Phase 6.3).
+  * **Outputs to:** Returns response text or dispatches streamed response tokens to CLI Layer (Phase 7.3).
 
-### [ ] 8.2: Directory & Persistence Manager
+### [ ] 7.2: Directory & Persistence Manager
 * **What it does:** Configures the storage locations for the codebase index. Creates a `.noesis/` directory inside the scanned repository to serialize the Symbol Table, Dependency Graph (NetworkX), BM25 data, and ChromaDB database.
 * **What it takes (Inputs):**
   * Scanned repository directory path.
@@ -327,11 +290,11 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Repository path (Phase 1.1), ChromaDB index (Phase 1.4), BM25 Index (Phase 3.1), Global Symbol Table (Phase 4.1), and Dependency Graph (Phase 4.2).
   * **Outputs to:** Writes serialized structures to the local repository filesystem. Restores these components on startup to avoid re-indexing.
 
-### [ ] 8.3: Unified CLI User Experience
+### [ ] 7.3: Unified CLI User Experience
 * **What it does:** Finalizes CLI behaviors. Provides:
   * Command to re-index the workspace: `noesiscli analyze <path> --force`.
   * Command to enter an interactive query chat loop: `noesiscli chat`.
-  * Visual progress bars for scanning, parsing, summarizing, and embedding.
+  * Visual progress bars for scanning, parsing, and embedding.
   * Styled markdown streaming rendering in the console.
 * **What it takes (Inputs):**
   * CLI execution instructions.
@@ -339,7 +302,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Pretty-printed output on the terminal.
 * **Technical details:** Use a library like `rich` or standard ANSI escape codes to render progress bars and pretty-print the markdown response stream.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** User terminal prompts, and streamed tokens from Fail-safe LLM Client (Phase 8.1).
+  * **Inputs from:** User terminal prompts, and streamed tokens from Fail-safe LLM Client (Phase 7.1).
   * **Outputs to:** Triggers repository analysis scanner (Phase 1.1 / Phase 5.2) and initializes LangGraph Workflow execution (Phase 2.1).
 
 ---

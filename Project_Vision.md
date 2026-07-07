@@ -8,13 +8,13 @@ Traditional Retrieval-Augmented Generation (RAG) systems treat source code as pl
 
 NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing with Tree-sitter. Instead of chunking code by character count, it understands programming language structure (supporting Python, JavaScript, TypeScript, Go, Java, and C++) and indexes complete functions, classes, methods, interfaces, and modules. To optimize ingestion performance, parsing is distributed in parallel across multiple CPU cores.
 
-During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains. It enriches chunks lacking documentation with AI-generated summaries and structured metadata, generating embeddings in batches using the Voyage AI API with the `voyage-code-3` model.
+During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains, generating embeddings in batches using the Voyage AI API with the `voyage-code-3` model.
 
 Instead of performing automated query validation and routing via an LLM, NoesisCLI lets the user explicitly control query routing through CLI subcommands. General programming questions are answered directly using the `ask` command, while repository-specific queries are routed through the RAG pipeline using the `query` command, avoiding unnecessary retrieval, reducing latency, and saving computational resources.
 
 For repository-aware queries, NoesisCLI executes parallel semantic search (using ChromaDB dense vectors) and lexical search (using a BM25 index), merging the results using Reciprocal Rank Fusion (RRF). Rather than sending raw files, the system uses the Symbol Table and Dependency Graph to surgically prune non-essential code bodies into signatures and placeholders, presenting a context-minimized skeletal file structure to the model.
 
-To ensure robustness and low latency, the system utilizes a multi-model architecture. It leverages Gemini 3.5 Flash for complex reasoning and summarization tasks, and Gemini 3.1 Flash-Lite for rapid validation, routing, and fallback support (automatically falling back if rate limits or API failures occur on the primary model). Finally, explanations are streamed directly to the terminal in real-time.
+To ensure robustness and low latency, the system utilizes a multi-model architecture. It leverages Gemini 3.1 Flash-Lite as the primary model for all tasks (to take advantage of its higher rate limits and low latency), with Gemini 3.5 Flash serving as a fallback if Gemini 3.1 Flash-Lite encounters rate limits or API failures. Finally, explanations are streamed directly to the terminal in real-time.
 
 The system uses local database storage and hybrid retrieval to maintain fast performance, combined with API-based embedding and LLM models.
 
@@ -84,10 +84,7 @@ The project aims to:
                                    Semantic Code Chunking
                                             │
                                             ▼
-                                Metadata & Docstring Generation
-                                            │
-                                            ▼
-                                  Embedding Generation
+                                   Embedding Generation
                                             │
                              ┌──────────────┴──────────────┐
                              ▼                             ▼
@@ -304,60 +301,9 @@ Structured code chunks.
 
 ---
 
-## Phase 7 — Metadata Generation
+## Phase 7 — Embedding Generation
 
-Every code chunk is enriched with searchable metadata, including relationships extracted from the Dependency Graph.
-
-Example metadata:
-
-```
-Function Name
-
-authenticate()
-
-Language
-
-Python
-
-File
-
-src/auth/service.py
-
-Parent Class
-
-UserService
-
-Arguments
-
-username
-password
-
-Returns
-
-JWT Token
-
-Visibility
-
-Public
-
-Dependencies
-- Database (class)
-- validate_token (function)
-```
-
-If documentation is missing, the high-stakes **Gemini 3.5 Flash** model is invoked to generate concise summaries describing each function, ensuring high-quality descriptions. If Gemini 3.5 Flash is rate-limited or fails, the system automatically falls back to **Gemini 3.1 Flash-Lite**.
-
-These summaries improve retrieval quality without modifying the original source code.
-
-### Output
-
-Rich metadata attached to every chunk.
-
----
-
-## Phase 8 — Embedding Generation
-
-Each code chunk and generated summary is converted into dense vector embeddings.
+Each code chunk is converted into dense vector embeddings.
 
 To maximize throughput, embeddings are generated in batches rather than one chunk at a time.
 
@@ -384,7 +330,7 @@ Embedding vectors.
 
 ---
 
-## Phase 9 — Index Construction
+## Phase 8 — Index Construction
 
 NoesisCLI builds two complementary search indexes, while keeping the Symbol Table and Dependency Graph in memory for real-time relational queries.
 
@@ -434,7 +380,7 @@ BM25 immediately finds exact occurrences.
 
 ---
 
-## Phase 10 — Hybrid Retrieval
+## Phase 9 — Hybrid Retrieval
 
 When the user asks a repository-specific question, both retrieval systems execute simultaneously.
 
@@ -463,7 +409,7 @@ Ranked list of relevant code chunks.
 
 ---
 
-## Phase 11 — Context Pruning
+## Phase 10 — Context Pruning
 
 Large Language Models perform poorly when unnecessary code is included.
 
@@ -501,28 +447,27 @@ Benefits:
 
 ---
 
-## Phase 12 — Prompt Construction
+## Phase 11 — Prompt Construction
 
 The prompt contains:
 
 - User question
 - Relevant code chunks
 - Dependency relationships and Symbol definitions
-- Metadata
+- Basic chunk metadata
 - File locations
-- Generated summaries
 
 Because only the most relevant functions and their direct dependency relationships are included, the prompt remains concise while retaining important context.
 
 ---
 
-## Phase 13 — LLM Reasoning
+## Phase 12 — LLM Reasoning
 
 The selected Large Language Model analyzes the prepared context and generates the final response. 
 
 To optimize performance and accuracy, NoesisCLI employs a multi-model fallback strategy:
 - **Path A (Direct LLM Response):** General programming queries are handled directly by the fast, low-cost **Gemini 3.1 Flash-Lite** model.
-- **Path B (Repository-Aware Response):** Complex, repository-specific queries (a high-stakes task requiring deep code comprehension) are routed to **Gemini 3.5 Flash**. If Gemini 3.5 Flash encounters a rate limit or API failure, the system falls back to **Gemini 3.1 Flash-Lite** to generate the response and ensure continuous availability.
+- **Path B (Repository-Aware Response):** Complex, repository-specific queries (a high-stakes task requiring deep code comprehension) are routed to **Gemini 3.1 Flash-Lite** as the primary model. If Gemini 3.1 Flash-Lite encounters a rate limit or API failure, the system falls back to **Gemini 3.5 Flash** to generate the response and ensure continuous availability.
 
 There are two execution paths.
 
@@ -555,7 +500,7 @@ The model reasons only over retrieved code rather than the entire repository.
 
 ---
 
-## Phase 14 — Streaming Response
+## Phase 13 — Streaming Response
 
 Instead of waiting for the entire answer ```
                      User Command
@@ -581,9 +526,6 @@ Instead of waiting for the entire answer ```
                                        │
                                        ▼
                              Semantic Code Chunks
-                                       │
-                                       ▼
-                              Metadata Generation
                                        │
                                        ▼
                            Batch Embedding Creation
@@ -626,7 +568,7 @@ Instead of waiting for the entire answer ```
 | Lexical Search | BM25 |
 | Hybrid Retrieval | Custom Rank Fusion |
 | CLI Framework | argparse (Standard Library) |
-| LLM | Gemini 3.5 Flash (Primary) & Gemini 3.1 Flash-Lite (Fallback/Routing) |
+| LLM | Gemini 3.1 Flash-Lite (Primary) & Gemini 3.5 Flash (Fallback) |
 | Streaming | LangChain Streaming Callbacks |
 
 ---
@@ -634,13 +576,12 @@ Instead of waiting for the entire answer ```
 # Key Features
 
 - Consolidated query validation and routing using Gemini 3.1 Flash-Lite to eliminate sequential LLM latency
-- Multi-model architecture: Gemini 3.5 Flash for high-stakes reasoning/summarization, and Gemini 3.1 Flash-Lite for routing, validation, and fallback support
-- Automatic fallback: fallback to Gemini 3.1 Flash-Lite in case of Gemini 3.5 Flash API rate limits or failures
+- Multi-model architecture: Gemini 3.1 Flash-Lite as the primary model for queries and routing, and Gemini 3.5 Flash for fallback support
+- Automatic fallback: fallback to Gemini 3.5 Flash in case of Gemini 3.1 Flash-Lite API rate limits or failures
 - Automatic routing between direct LLM and RAG pipeline
 - Syntax-aware AST code chunking
 - Parallel repository parsing using multiprocessing
 - Global Symbol Table and Dependency Graph for relationship tracing
-- Automatic metadata and summary generation
 - Batch embedding generation using Voyage AI API (voyage-code-3)
 - Hybrid retrieval using dense vectors and BM25
 - Context-aware prompt pruning
