@@ -1,21 +1,10 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-# Try to import, otherwise skip tests or mock imports
 try:
     from noesiscli.pipeline.state import WorkflowState
 except ImportError:
     WorkflowState = None
-
-try:
-    from noesiscli.pipeline.validation import QueryValidator
-except ImportError:
-    QueryValidator = None
-
-try:
-    from noesiscli.pipeline.router import QueryRouter
-except ImportError:
-    QueryRouter = None
 
 try:
     from noesiscli.pipeline.direct import DirectResponder
@@ -36,79 +25,14 @@ except ImportError:
 @pytest.mark.skipif(WorkflowState is None, reason="WorkflowState not implemented")
 def test_workflow_state():
     """Test that the state tracks the necessary RAG pipeline attributes."""
-    # State could be a TypedDict or a Pydantic model
-    # If TypedDict, we check it behaves like a dict:
     state = {
         "query": "How does auth work?",
-        "is_valid": True,
         "route": "repository_rag",
         "context_chunks": [],
         "response": ""
     }
     assert state["query"] == "How does auth work?"
-    assert state["is_valid"] is True
-
-
-@pytest.mark.skipif(QueryValidator is None, reason="QueryValidator not implemented")
-@patch("noesiscli.models.client.GeminiClient")
-def test_query_validator(mock_gemini_client):
-    """Test that coding queries are validated and non-coding queries are rejected."""
-    mock_instance = mock_gemini_client.return_value
-    
-    # Mock validation output
-    mock_instance.generate.side_effect = ["True", "False"]
-    
-    validator = QueryValidator(llm_client=mock_instance)
-    
-    # Valid
-    assert validator.validate("Explain recursion") is True
-    # Invalid
-    assert validator.validate("What is the weather today?") is False
-
-
-@pytest.mark.skipif(QueryValidator is None, reason="QueryValidator not implemented")
-@patch("noesiscli.models.client.GeminiClient")
-def test_query_validator_validate_and_route(mock_gemini_client):
-    """Test that validate_and_route classifies queries correctly in one step."""
-    mock_instance = mock_gemini_client.return_value
-    mock_instance.generate.side_effect = ["repository_rag", "direct_llm", "invalid", "True", "repository_rag"]
-    
-    validator = QueryValidator(llm_client=mock_instance)
-    
-    # 1. repository_rag
-    is_valid, route = validator.validate_and_route("Explain the database configuration")
-    assert is_valid is True
-    assert route == "repository_rag"
-    
-    # 2. direct_llm
-    is_valid, route = validator.validate_and_route("What is a class?")
-    assert is_valid is True
-    assert route == "direct_llm"
-    
-    # 3. invalid
-    is_valid, route = validator.validate_and_route("What is the weather today?")
-    assert is_valid is False
-    assert route == "invalid"
-
-    # 4. Backward-compatible "True" response which should trigger a fallback router call
-    is_valid, route = validator.validate_and_route("How do I code?")
-    assert is_valid is True
-    assert route == "repository_rag"
-
-
-@pytest.mark.skipif(QueryRouter is None, reason="QueryRouter not implemented")
-@patch("noesiscli.models.client.GeminiClient")
-def test_query_router(mock_gemini_client):
-    """Test routing classification between direct_llm and repository_rag."""
-    mock_instance = mock_gemini_client.return_value
-    mock_instance.generate.side_effect = ["direct_llm", "repository_rag"]
-    
-    router = QueryRouter(llm_client=mock_instance)
-    
-    # General question
-    assert router.route("What is a decorator?") == "direct_llm"
-    # Repo-specific
-    assert router.route("Where is payment database defined?") == "repository_rag"
+    assert state["route"] == "repository_rag"
 
 
 @pytest.mark.skipif(DirectResponder is None, reason="DirectResponder not implemented")
@@ -149,5 +73,4 @@ def test_workflow_graph_compiles():
     graph = wf_graph.compile()
     
     assert graph is not None
-    # LangGraph compiled graph has print_ascii, invoke, or get_graph method
     assert hasattr(graph, "invoke")

@@ -10,16 +10,9 @@ Hooks up:
 import sys
 from langgraph.graph import StateGraph, START, END
 from noesiscli.pipeline.state import WorkflowState
-from noesiscli.pipeline.validation import QueryValidator
-from noesiscli.pipeline.router import QueryRouter
 from noesiscli.pipeline.direct import DirectResponder
 from noesiscli.pipeline.rag import RAGNode
 from noesiscli.models.client import GeminiClient
-
-def check_validation(state: WorkflowState) -> str:
-    if state.get("is_valid"):
-        return "route_node"
-    return END
 
 def check_route(state: WorkflowState) -> str:
     if state.get("route") == "repository_rag":
@@ -32,28 +25,10 @@ class WorkflowGraph:
         self.retriever = retriever
         
         from noesiscli.config import GEMINI_3_1_FLASH_LITE
-        validator_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE, max_output_tokens=50)
-        router_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE, max_output_tokens=50)
         direct_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE)
 
-        self.validator = QueryValidator(llm_client=validator_client)
-        self.router = QueryRouter(llm_client=router_client)
         self.direct_responder = DirectResponder(llm_client=direct_client)
         self.rag_node = RAGNode(llm_client=self.llm_client, retriever=self.retriever)
-
-    def validate_node(self, state: WorkflowState) -> dict:
-        # Avoid logging/printing inside validation when testing
-        is_valid, route = self.validator.validate_and_route(state["query"])
-        if not is_valid:
-            feedback = "Please ask a programming or repository-related question. I can only assist with coding or software development tasks."
-            return {"is_valid": False, "feedback": feedback, "response": feedback, "route": None}
-        return {"is_valid": True, "feedback": None, "route": route}
-
-    def route_node(self, state: WorkflowState) -> dict:
-        if state.get("route"):
-            return {}
-        route = self.router.route(state["query"])
-        return {"route": route}
 
     def direct_llm_node(self, state: WorkflowState) -> dict:
         print("\nResponse:")
@@ -99,26 +74,12 @@ class WorkflowGraph:
         builder = StateGraph(WorkflowState)
         
         # Add nodes
-        builder.add_node("validate_node", self.validate_node)
-        builder.add_node("route_node", self.route_node)
         builder.add_node("direct_llm_node", self.direct_llm_node)
         builder.add_node("rag_node", self.rag_node_node)
         
-        # Set entry point
-        builder.add_edge(START, "validate_node")
-        
-        # Add conditional edges
+        # Set entry point conditional edges
         builder.add_conditional_edges(
-            "validate_node",
-            check_validation,
-            {
-                "route_node": "route_node",
-                END: END
-            }
-        )
-        
-        builder.add_conditional_edges(
-            "route_node",
+            START,
             check_route,
             {
                 "rag_node": "rag_node",

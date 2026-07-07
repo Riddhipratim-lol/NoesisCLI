@@ -85,45 +85,41 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [x] Phase 2 — Workflow Orchestration, Validation, & Routing (LangGraph)
-**Objective:** Orchestrate the application workflow using LangGraph, incorporating security/usefulness validation and query routing before invoking any RAG pipeline components.
+## [x] Phase 2 — Workflow Orchestration & Manual Routing (LangGraph)
+**Objective:** Orchestrate the application workflow using LangGraph, routing queries directly based on the user's CLI command to eliminate sequential LLM latency and ensure precise execution paths.
 
 ### [x] 2.1: LangGraph Workflow Setup
-* **What it does:** Creates a state machine representing the lifecycle of NoesisCLI queries (Validation Node -> Router Node -> Direct LLM Node / RAG Pipeline Node).
+* **What it does:** Creates a state machine representing the lifecycle of NoesisCLI queries. Based on the predefined route in the state, the graph routes the query either directly to the Direct LLM Responder node or the Repository RAG node.
 * **What it takes (Inputs):**
-  * A state dictionary containing `query`, `is_valid`, `route`, `context_chunks`, and `response`.
+  * A state dictionary containing `query`, `route`, `context_chunks`, and `response`.
 * **What it returns (Outputs):**
   * Compilation of the LangGraph execution flow.
 * **Technical details:** Use `langgraph.graph.StateGraph` to define nodes and conditional edges.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** CLI User Interface (Phase 8.3) passing the raw query.
-  * **Outputs to:** Controls and dispatches the execution flow to Query Validation (Phase 2.2), Query Router (Phase 2.3), Direct Responder (Phase 2.4), Hybrid Retriever (Phase 3.2), Context Pruner (Phase 7.3), and LLM Reasoner (Phase 8.1).
+  * **Inputs from:** CLI subcommands (Phase 2.2) initializing the state.
+  * **Outputs to:** Controls and dispatches the execution flow via LangGraph conditional routing (Phase 2.3).
 
-### [x] 2.2: Query Validation Layer
-* **What it does:** Evaluates the incoming prompt using Gemini 3.1 Flash-Lite to confirm that the query is programming-related or repository-related, consolidating validation and routing into a single LLM call to eliminate sequential latency. Constraints the response shape using a Pydantic model (`QueryClassification`).
+### [x] 2.2: CLI-Based Manual Routing (Subcommands)
+* **What it does:** The user explicitly directs the execution path using distinct CLI commands. The subcommand `noesiscli query "<prompt>"` sets the workflow route state to `"repository_rag"`, while `noesiscli ask "<prompt>"` sets it to `"direct_llm"`.
 * **What it takes (Inputs):**
-  * Raw user prompt.
+  * Raw CLI user subcommand and prompt.
 * **What it returns (Outputs):**
-  * Boolean flag `is_valid` indicating validity.
-  * Preserved or classified `route` flag (`"direct_llm"` or `"repository_rag"` or `"invalid"`).
-  * Rejection message `feedback` if the query is invalid (e.g., asking for weather or movie recommendations).
-* **Technical details:** Pass the query to Gemini 3.1 Flash-Lite with structured output matching a Pydantic `QueryClassification` model. Configure the LLM client with `max_output_tokens=50` to restrict the generated token counts and minimize latency. If validation fails, the graph routes directly to a terminal node that outputs the feedback.
+  * Initialized LangGraph state with `route` explicitly configured.
+* **Technical details:** Parse CLI subcommands using `argparse`. Ensure that `.noesis` directory check is only performed for `query` command.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Raw query via LangGraph State (Phase 2.1).
-  * **Outputs to:** Validation results state update (`is_valid`, `route`) in LangGraph. If validation fails, triggers response feedback printing in CLI (Phase 8.3).
-  * **Integration Notes:** Dispatches all API requests through the central Fail-safe LLM Client (Phase 8.1). Provides fallback to text-generation if structured output is not supported by mock clients in testing.
+  * **Inputs from:** CLI User Interface (Phase 8.3).
+  * **Outputs to:** LangGraph state initialization (Phase 2.1).
 
-### [x] 2.3: Intelligent Query Router
-* **What it does:** Categorizes valid coding queries into two paths: General Coding (answered directly) and Repository-Specific (requires RAG pipeline), by reading the cached route decision from the validation layer.
+### [x] 2.3: LangGraph Conditional Router
+* **What it does:** Evaluates the `route` parameter from the workflow state directly at the start of the LangGraph execution to route the flow to either `direct_llm` node or `repository_rag` node without an LLM-based routing step.
 * **What it takes (Inputs):**
-  * Valid user query and cached `route` from state.
+  * Predefined `route` value in workflow state.
 * **What it returns (Outputs):**
-  * A routing flag: `"direct_llm"` or `"repository_rag"`.
-* **Technical details:** Uses the cached route from the state (assigned during validation) to bypass a second network round-trip. If the route is not present in the state (e.g., in fallback scenarios), calls Gemini 3.1 Flash-Lite to classify the query.
+  * Conditional edge routing destination name (`"direct_llm"` or `"repository_rag"`).
+* **Technical details:** Implement `check_route` conditional routing function linked to `START`.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Verified query and cached `route` from State after Query Validation (Phase 2.2) succeeds.
-  * **Outputs to:** Controls the conditional edge route in LangGraph: routing to Direct LLM Responder (Phase 2.4) or Hybrid Retriever (Phase 3.2).
-  * **Integration Notes:** Performs model queries via the Fail-safe LLM Client (Phase 8.1).
+  * **Inputs from:** State initialized by manual routing (Phase 2.2).
+  * **Outputs to:** Direct LLM responder (Phase 2.4) or Hybrid Retriever (Phase 3.2).
 
 ### [x] 2.4: Direct LLM Route Execution
 * **What it does:** Implements the fast direct answer path for general questions using Gemini 3.1 Flash-Lite, saving the system from searching ChromaDB or loading code.
@@ -135,6 +131,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Router decision in state (Phase 2.3) when set to `"direct_llm"`.
   * **Outputs to:** Streams response tokens directly to CLI Layer (Phase 8.3).
   * **Integration Notes:** Communicates with Gemini 3.1 Flash-Lite using the Fail-safe LLM Client (Phase 8.1).
+
 
 ---
 
@@ -163,7 +160,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   $$RRF(d) = \sum_{m \in M} \frac{1}{k + r_m(d)}$$ 
   where $r_m(d)$ is the rank of document $d$ in retriever $m$, and $k$ is a constant (commonly 60). De-duplicate chunks that appear in both retrievals based on file paths and line ranges.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** User query from Router state (Phase 2.3), ChromaDB dense retriever (Phase 1.4/6.3), and BM25 lexical retriever (Phase 3.1/6.3).
+  * **Inputs from:** User query from LangGraph State (Phase 2.1), ChromaDB dense retriever (Phase 1.4/6.3), and BM25 lexical retriever (Phase 3.1/6.3).
   * **Outputs to:** Unified list of candidate chunks sent to Dependency Context Resolver (Phase 7.1).
   * **Integration Notes:** Calls Voyage AI Embedding Generator (Phase 1.3) to generate query embeddings for the dense search branch.
 
@@ -309,15 +306,15 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 **Objective:** Finalize the CLI commands, implement robust client-side retry/fallback logic, serialize graphs, and optimize the overall CLI user experience.
 
 ### [ ] 8.1: Fail-safe LLM Client
-* **What it does:** Wraps all Gemini API calls (routing, summaries, reasoning) in a client that detects errors (network failure, rate limit, quota exceeded) on Gemini 3.5 Flash and automatically routes the request to Gemini 3.1 Flash-Lite.
+* **What it does:** Wraps all Gemini API calls (summaries, reasoning) in a client that detects errors (network failure, rate limit, quota exceeded) on Gemini 3.5 Flash and automatically routes the request to Gemini 3.1 Flash-Lite.
 * **What it takes (Inputs):**
   * API payload (messages, parameters).
 * **What it returns (Outputs):**
   * LLM response stream or text object.
 * **Technical details:** Wrap the LangChain execution in try-except blocks, handling API errors and switching model endpoints dynamically.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Validation (Phase 2.2), Router (Phase 2.3), Direct responder (Phase 2.4), Summary generator (Phase 6.2), and Prompt Constructor (Phase 7.3).
-  * **Outputs to:** Returns response text (validation/routing/summaries) or dispatches streamed response tokens to CLI Layer (Phase 8.3).
+  * **Inputs from:** Direct responder (Phase 2.4), Summary generator (Phase 6.2), and Prompt Constructor (Phase 7.3).
+  * **Outputs to:** Returns response text (summaries) or dispatches streamed response tokens to CLI Layer (Phase 8.3).
 
 ### [ ] 8.2: Directory & Persistence Manager
 * **What it does:** Configures the storage locations for the codebase index. Creates a `.noesis/` directory inside the scanned repository to serialize the Symbol Table, Dependency Graph (NetworkX), BM25 data, and ChromaDB database.
@@ -342,7 +339,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Pretty-printed output on the terminal.
 * **Technical details:** Use a library like `rich` or standard ANSI escape codes to render progress bars and pretty-print the markdown response stream.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** User terminal prompts, validation failures (Phase 2.2), and streamed tokens from Fail-safe LLM Client (Phase 8.1).
+  * **Inputs from:** User terminal prompts, and streamed tokens from Fail-safe LLM Client (Phase 8.1).
   * **Outputs to:** Triggers repository analysis scanner (Phase 1.1 / Phase 5.2) and initializes LangGraph Workflow execution (Phase 2.1).
 
 ---
@@ -355,37 +352,32 @@ sequenceDiagram
     autonumber
     actor User as User
     participant CLI as CLI Layer
-    participant LLM_V as Query Validator (Gemini 3.1 Flash-Lite)
-    participant Router as Query Router (Gemini 3.1 Flash-Lite)
-    participant Direct as Direct Responder
+    participant Graph as LangGraph Workflow
+    participant Direct as Direct Responder (Gemini 3.1 Flash-Lite)
     participant Search as Hybrid Searcher
     participant DB as Chroma & BM25 Indexes
-    participant Graph as Symbol Table & Dependency Graph
+    participant GraphDB as Symbol Table & Dependency Graph
     participant Pruner as Context Pruner (Tree-sitter)
     participant LLM_R as LLM Reasoner (Gemini 3.5 Flash / Fallback)
 
-    User->>CLI: noesiscli query "How is authorization handled?"
-    CLI->>LLM_V: Validate Query
-    alt Query is Invalid
-        LLM_V-->>CLI: Invalid query feedback
-        CLI-->>User: Please ask a programming or repository-related question.
-    else Query is Valid
-        LLM_V->>Router: Route Query
-        alt General Coding Query
-            Router-->>Direct: Route to Direct LLM Response
-            Direct->>User: Streamed explanation (Gemini 3.1 Flash-Lite)
-        else Repository Query
-            Router-->>Search: Route to Repository RAG Pipeline
-            Search->>DB: Parallel query (Dense Vector & Lexical BM25)
-            DB-->>Search: Return top-k candidate chunks
-            Search->>Search: Merge & rank via Reciprocal Rank Fusion
-            Search->>Graph: Fetch related symbol locations & call chains
-            Graph-->>Search: Return related dependencies & references
-            Search->>Pruner: Resolve code context
-            Pruner->>Pruner: Prune non-essential function/class bodies
-            Pruner-->>Search: Return context-minimized code structure
-            Search->>LLM_R: Run reasoning over pruned code context
-            LLM_R-->>User: Streamed repository explanation
-        end
+    alt User asks a general question
+        User->>CLI: noesiscli ask "What is recursion?"
+        CLI->>Graph: Initialize state with route="direct_llm"
+        Graph->>Direct: Route to Direct LLM Responder
+        Direct->>User: Streamed explanation (Gemini 3.1 Flash-Lite)
+    else User queries the repository
+        User->>CLI: noesiscli query "Where is authorization handled?"
+        CLI->>Graph: Initialize state with route="repository_rag"
+        Graph->>Search: Route to Repository RAG Pipeline
+        Search->>DB: Parallel query (Dense Vector & Lexical BM25)
+        DB-->>Search: Return top-k candidate chunks
+        Search->>Search: Merge & rank via Reciprocal Rank Fusion
+        Search->>GraphDB: Fetch related symbol locations & call chains
+        GraphDB-->>Search: Return related dependencies & references
+        Search->>Pruner: Resolve code context
+        Pruner->>Pruner: Prune non-essential function/class bodies
+        Pruner-->>Search: Return context-minimized code structure
+        Search->>LLM_R: Run reasoning over pruned code context
+        LLM_R-->>User: Streamed repository explanation
     end
 ```

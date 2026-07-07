@@ -23,8 +23,12 @@ def main():
     analyze_parser.add_argument("repo_path", type=str, help="Path to the local repository")
 
     # Query command
-    query_parser = subparsers.add_parser("query", help="Run a single query against the codebase or general LLM")
+    query_parser = subparsers.add_parser("query", help="Run a RAG query against the codebase context")
     query_parser.add_argument("prompt", type=str, help="The query/prompt to execute")
+
+    # Ask command
+    ask_parser = subparsers.add_parser("ask", help="Ask a general programming question directly to the LLM")
+    ask_parser.add_argument("prompt", type=str, help="The query/prompt to execute")
 
     args = parser.parse_args()
 
@@ -68,39 +72,40 @@ def main():
             
         return all_chunks
         
-    elif args.command == "query":
+    elif args.command in ("query", "ask"):
         prompt = args.prompt
-        # Search for .noesis in current dir or parents
-        cwd = os.getcwd()
-        db_path = os.path.join(cwd, ".noesis", "chroma")
-        if not os.path.isdir(db_path):
-            print("Error: Noesis index not found. Please run 'noesiscli analyze <path>' first in this directory.", file=sys.stderr)
-            sys.exit(1)
-            
-        vector_store = ChromaVectorStore(persist_directory=db_path)
         
         from noesiscli.models.client import GeminiClient
         from noesiscli.pipeline.graph import WorkflowGraph
         
         client = GeminiClient()
-        wf_graph = WorkflowGraph(llm_client=client, retriever=vector_store)
+        
+        if args.command == "query":
+            # Search for .noesis in current dir or parents
+            cwd = os.getcwd()
+            db_path = os.path.join(cwd, ".noesis", "chroma")
+            if not os.path.isdir(db_path):
+                print("Error: Noesis index not found. Please run 'noesiscli analyze <path>' first in this directory.", file=sys.stderr)
+                sys.exit(1)
+                
+            vector_store = ChromaVectorStore(persist_directory=db_path)
+            wf_graph = WorkflowGraph(llm_client=client, retriever=vector_store)
+            route = "repository_rag"
+        else:
+            # ask command
+            wf_graph = WorkflowGraph(llm_client=client, retriever=None)
+            route = "direct_llm"
+            
         graph = wf_graph.compile()
         
         initial_state = {
             "query": prompt,
-            "is_valid": None,
-            "route": None,
+            "route": route,
             "context_chunks": [],
-            "response": "",
-            "feedback": None
+            "response": ""
         }
         
         final_state = graph.invoke(initial_state)
-        
-        if not final_state.get("is_valid"):
-            print(f"\n[Validation Failed] {final_state.get('feedback')}", file=sys.stderr)
-            return []
-            
         return final_state.get("context_chunks", [])
         
     else:

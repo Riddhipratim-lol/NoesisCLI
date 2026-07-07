@@ -12,8 +12,6 @@ from typing import TypedDict, List, Dict, Any, Optional
 
 class WorkflowState(TypedDict):
     query: str
-    is_valid: bool
     route: str
     context_chunks: List[Dict[str, Any]]
     response: str
-    feedback: Optional[str]

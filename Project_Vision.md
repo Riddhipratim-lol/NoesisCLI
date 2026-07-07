@@ -10,7 +10,7 @@ NoesisCLI solves this problem by performing syntax-aware indexing using Abstract
 
 During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains. It enriches chunks lacking documentation with AI-generated summaries and structured metadata, generating embeddings in batches using the Voyage AI API with the `voyage-code-3` model.
 
-Before executing any RAG pipeline components, NoesisCLI performs query validation to ensure the prompt is programming-related. Once validated, the query router determines whether the query requires repository analysis. General programming questions are answered directly, while repository-specific queries are routed through the RAG pipeline, avoiding unnecessary retrieval, reducing latency, and saving computational resources.
+Instead of performing automated query validation and routing via an LLM, NoesisCLI lets the user explicitly control query routing through CLI subcommands. General programming questions are answered directly using the `ask` command, while repository-specific queries are routed through the RAG pipeline using the `query` command, avoiding unnecessary retrieval, reducing latency, and saving computational resources.
 
 For repository-aware queries, NoesisCLI executes parallel semantic search (using ChromaDB dense vectors) and lexical search (using a BM25 index), merging the results using Reciprocal Rank Fusion (RRF). Rather than sending raw files, the system uses the Symbol Table and Dependency Graph to surgically prune non-essential code bodies into signatures and placeholders, presenting a context-minimized skeletal file structure to the model.
 
@@ -50,9 +50,8 @@ NoesisCLI addresses these limitations through intelligent query routing, syntax-
 
 The project aims to:
 
-- Determine whether a query is programming-related before processing it.
-- Distinguish between general coding questions and repository-specific questions.
-- Route repository questions through the RAG pipeline only when necessary.
+- Distinguish between general coding questions and repository-specific questions using manual CLI commands (`ask` vs. `query`).
+- Route repository questions through the RAG pipeline when the user invokes the `query` command.
 - Understand repository structure using AST parsing.
 - Preserve programming language semantics during indexing.
 - Build a searchable knowledge base of the codebase.
@@ -66,132 +65,80 @@ The project aims to:
 # High-Level Architecture
 
 ```
-                    User Query
-                         │
-                         ▼
-               Query Validation Layer
-                         │
-             ┌───────────┴───────────┐
-             │                       │
-       Invalid Coding Query     Valid Coding Query
-             │                       │
-             ▼                       ▼
-     Ask User to Rephrase      Query Router
-                                       │
-                         ┌─────────────┴─────────────┐
-                         │                           │
-                  General Coding Query       Repository Query
-                         │                           │
-                         ▼                           ▼
-                  Direct LLM Answer         Repository Scanner
-                                                     │
-                                                     ▼
-                                            Parallel AST Parsing
-                                                     │
-                                                     ▼
-                                 Symbol Table & Dependency Graph Construction
-                                                     │
-                                                     ▼
-                                            Semantic Code Chunking
-                                                     │
-                                                     ▼
-                                         Metadata & Docstring Generation
-                                                     │
-                                                     ▼
-                                           Embedding Generation
-                                                     │
-                                      ┌──────────────┴──────────────┐
-                                      ▼                             ▼
-                               Chroma Vector DB                BM25 Index
-                                      │                             │
-                                      └──────────────┬──────────────┘
-                                                     ▼
-                                              Hybrid Retriever
-                                                     │
-                                                     ▼
-                                             Context Pruning
-                                                     │
-                                                     ▼
-                                             Prompt Construction
-                                                     │
-                                                     ▼
-                                              Large Language Model
-                                                     │
-                                                     ▼
-                                             Streaming Response
+                       User Command
+                            │
+            ┌───────────────┴───────────────┐
+            ▼                               ▼
+       noesiscli ask                 noesiscli query
+            │                               │
+            ▼                               ▼
+    Direct LLM Answer              Repository Scanner
+                                            │
+                                            ▼
+                                   Parallel AST Parsing
+                                            │
+                                            ▼
+                        Symbol Table & Dependency Graph Construction
+                                            │
+                                            ▼
+                                   Semantic Code Chunking
+                                            │
+                                            ▼
+                                Metadata & Docstring Generation
+                                            │
+                                            ▼
+                                  Embedding Generation
+                                            │
+                             ┌──────────────┴──────────────┐
+                             ▼                             ▼
+                      Chroma Vector DB                BM25 Index
+                             │                             │
+                             └──────────────┬──────────────┘
+                                            ▼
+                                     Hybrid Retriever
+                                            │
+                                            ▼
+                                     Context Pruning
+                                            │
+                                            ▼
+                                    Prompt Construction
+                                            │
+                                            ▼
+                                     Large Language Model
+                                            │
+                                            ▼
+                                     Streaming Response
 ```
 
 ---
 
 # Complete Workflow
 
-## Phase 1 — User Query Validation
-Every interaction begins with a lightweight validation and routing stage consolidated into a single call powered by the cost-effective and low-latency **Gemini 3.1 Flash-Lite** model. This prevents sequential LLM execution latency and minimizes cold start times. To achieve peak efficiency, this node utilizes native Pydantic structured outputs (binding to a `QueryClassification` model) and restricts generation limits to `max_output_tokens=50` to minimize execution latency.
+## Phase 1 — CLI-Based Manual Routing
+Instead of automated routing or validation via the LLM, the user explicitly controls the execution path using distinct CLI commands. This eliminates execution latency from validation layers and guarantees the desired query flow.
 
-The system evaluates the query in one step to determine both its validity (whether the prompt is programming/software-related) and its target routing target.
+Two subcommands are supported:
 
-Examples of valid queries:
+### noesiscli ask "<query>" (General conceptual coding questions)
+This command handles conceptual programming questions that do not require analyzing the repository files.
+Examples:
 - Explain recursion.
 - How does dependency injection work?
-- Where is authentication implemented in this repository?
-- Explain the login flow.
-- What does this function do?
-
-Examples of invalid queries:
-- What's the weather today?
-- Recommend a movie.
-- Tell me a joke.
-
-If the query is not related to programming, the system does not continue further. Instead, it politely asks the user to provide a programming or repository-related question.
-
-### Input
-Raw user prompt.
-
-### Output
-- Valid coding query (with pre-computed route)
-- Invalid query (request user to rephrase)
-
----
-
-## Phase 2 — Intelligent Query Routing
-Once the query is validated and routed in the initial single-call optimization stage, the Router Node reads the cached routing decision from the graph's workflow state. If the cached decision is absent, it falls back to routing classification using **Gemini 3.1 Flash-Lite** with structured output support and a strict limit of `max_output_tokens=50` to maintain rapid routing speeds.
-
-Two categories of programming questions are supported:
-
-### General Programming Questions
-These are conceptual questions that do not depend on the contents of the repository.
-
-Examples:
 - What is polymorphism?
-- Explain Python decorators.
-- What is dependency injection?
-- Explain REST APIs.
 
-These questions are answered directly by the LLM (using Gemini 3.1 Flash-Lite) without invoking the RAG pipeline.
-
-Advantages:
-- Faster response
-- Lower latency
-- No retrieval overhead
-- Reduced computational cost
+### noesiscli query "<query>" (Repository-aware questions)
+This command routes the query to the RAG pipeline to search and analyze the uploaded codebase.
+Examples:
+- Where is authentication implemented in this repository?
+- Explain the login flow in this codebase.
+- What does this UserService class do?
 
 ---
 
-### Repository-Specific Questions
-These questions require understanding the uploaded repository.
-
-Examples:
-- Explain the authentication flow.
-- Where is this API called?
-- How does the payment module work?
-- Which function creates database connections?
-- Explain this class.
-
-These queries are forwarded to the repository analysis pipeline.
-
-### Output
-- Direct LLM route
-- Repository RAG route
+## Phase 2 — Workflow Orchestration (LangGraph)
+The CLI compiles and runs a simplified LangGraph workflow. Based on the selected CLI command, the graph routes the state directly to either the Direct LLM node or the Repository RAG node:
+- **`direct_llm`**: Invokes the `Direct LLM Response` node, which queries Gemini 3.1 Flash-Lite to stream a response.
+- **`repository_rag`**: Invokes the `Repository RAG` node, which initiates retrieval and reasoning over the code context.
 
 ---
 
@@ -610,79 +557,54 @@ The model reasons only over retrieved code rather than the entire repository.
 
 ## Phase 14 — Streaming Response
 
-Instead of waiting for the entire answer to finish generating, NoesisCLI streams tokens to the terminal in real time.
-
-Benefits:
-
-- Near-zero perceived latency
-- Faster user feedback
-- Improved interactive experience
-
-The total generation time remains similar, but the user receives information immediately.
-
----
-
-# Data Flow
-
-```
-                     User Query
+Instead of waiting for the entire answer ```
+                     User Command
                           │
-                          ▼
-                Query Validation Layer
-                          │
-                Is it a coding question?
-                 ┌────────┴────────┐
-                 │                 │
-                No                Yes
-                 │                 │
-                 ▼                 ▼
-      Ask user to rephrase   Intelligent Query Router
-                                   │
-                      ┌────────────┴────────────┐
-                      │                         │
-               General Coding           Repository Query
-                      │                         │
-                      ▼                         ▼
-               Direct LLM Answer      Local Repository
-                                              │
-                                              ▼
-                                    Repository Scanner
-                                              │
-                                              ▼
-                                   Parallel Tree-sitter Parsing
-                                              │
-                                              ▼
-                                          AST Nodes
-                                              │
-                                              ▼
-                           Symbol Table & Dependency Graph Creation
-                                              │
-                                              ▼
-                                    Semantic Code Chunks
-                                              │
-                                              ▼
-                                    Metadata Generation
-                                              │
-                                              ▼
-                                 Batch Embedding Creation
-                                              │
-                                              ▼
-                                 Dense Vector Index (ChromaDB)
-                                              │
-                                   ┌──────────┴──────────┐
-                                   ▼                     ▼
-                             Vector Search          BM25 Search
-                                   └──────────┬──────────┘
-                                              ▼
-                                      Hybrid Retrieval
-                                              ▼
-                                      Context Pruning
-                                              ▼
-                                     Prompt Construction
-                                              ▼
-                                     Large Language Model
-                                              ▼
-                                     Streaming Explanation
+             ┌────────────┴────────────┐
+             ▼                         ▼
+       noesiscli ask            noesiscli query
+             │                         │
+             ▼                         ▼
+      Direct LLM Answer        Local Repository
+                                       │
+                                       ▼
+                               Repository Scanner
+                                       │
+                                       ▼
+                          Parallel Tree-sitter Parsing
+                                       │
+                                       ▼
+                                   AST Nodes
+                                       │
+                                       ▼
+                    Symbol Table & Dependency Graph Creation
+                                       │
+                                       ▼
+                             Semantic Code Chunks
+                                       │
+                                       ▼
+                              Metadata Generation
+                                       │
+                                       ▼
+                           Batch Embedding Creation
+                                       │
+                                       ▼
+                           Dense Vector Index (ChromaDB)
+                                       │
+                             ┌─────────┴─────────┐
+                             ▼                   ▼
+                       Vector Search        BM25 Search
+                             └─────────┬─────────┘
+                                       ▼
+                               Hybrid Retrieval
+                                       ▼
+                               Context Pruning
+                                       ▼
+                              Prompt Construction
+                                       ▼
+                              Large Language Model
+                                       ▼
+                              Streaming Explanation
 ```
 
 ---
