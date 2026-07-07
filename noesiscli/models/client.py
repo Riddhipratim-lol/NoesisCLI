@@ -32,10 +32,11 @@ class GeminiClient:
     Fail-safe Gemini Client that calls primary model (Gemini 3.5 Flash)
     and falls back to secondary model (Gemini 3.1 Flash-Lite) on failure.
     """
-    def __init__(self, primary_model: str = None, fallback_model: str = None):
+    def __init__(self, primary_model: str = None, fallback_model: str = None, max_output_tokens: int = None):
         from noesiscli.config import GEMINI_3_5_FLASH, GEMINI_3_1_FLASH_LITE
         self.primary_model_name = primary_model or GEMINI_3_5_FLASH
         self.fallback_model_name = fallback_model or GEMINI_3_1_FLASH_LITE
+        self.max_output_tokens = max_output_tokens
         
         self.api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
         if self.api_key:
@@ -50,11 +51,14 @@ class GeminiClient:
         if self._primary_llm is None:
             if not self.api_key and not os.environ.get("PYTEST_CURRENT_TEST"):
                 raise ValueError("Google API key is not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY.")
-            self._primary_llm = ChatGoogleGenerativeAI(
-                model=self.primary_model_name,
-                temperature=0.2,
-                google_api_key=self.api_key
-            )
+            kwargs = {
+                "model": self.primary_model_name,
+                "temperature": 0.2,
+                "google_api_key": self.api_key
+            }
+            if self.max_output_tokens is not None:
+                kwargs["max_output_tokens"] = self.max_output_tokens
+            self._primary_llm = ChatGoogleGenerativeAI(**kwargs)
         return self._primary_llm
 
     @property
@@ -62,11 +66,14 @@ class GeminiClient:
         if self._fallback_llm is None:
             if not self.api_key and not os.environ.get("PYTEST_CURRENT_TEST"):
                 raise ValueError("Google API key is not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY.")
-            self._fallback_llm = ChatGoogleGenerativeAI(
-                model=self.fallback_model_name,
-                temperature=0.2,
-                google_api_key=self.api_key
-            )
+            kwargs = {
+                "model": self.fallback_model_name,
+                "temperature": 0.2,
+                "google_api_key": self.api_key
+            }
+            if self.max_output_tokens is not None:
+                kwargs["max_output_tokens"] = self.max_output_tokens
+            self._fallback_llm = ChatGoogleGenerativeAI(**kwargs)
         return self._fallback_llm
 
     def generate(self, prompt: str, system_instruction: str = None) -> str:

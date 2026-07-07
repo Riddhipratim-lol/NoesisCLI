@@ -32,8 +32,8 @@ class WorkflowGraph:
         self.retriever = retriever
         
         from noesiscli.config import GEMINI_3_1_FLASH_LITE
-        validator_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE)
-        router_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE)
+        validator_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE, max_output_tokens=50)
+        router_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE, max_output_tokens=50)
         direct_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE)
 
         self.validator = QueryValidator(llm_client=validator_client)

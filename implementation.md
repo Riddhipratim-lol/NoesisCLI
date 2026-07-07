@@ -100,27 +100,28 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** Controls and dispatches the execution flow to Query Validation (Phase 2.2), Query Router (Phase 2.3), Direct Responder (Phase 2.4), Hybrid Retriever (Phase 3.2), Context Pruner (Phase 7.3), and LLM Reasoner (Phase 8.1).
 
 ### [x] 2.2: Query Validation Layer
-* **What it does:** Evaluates the incoming prompt using Gemini 3.1 Flash-Lite to confirm that the query is programming-related or repository-related.
+* **What it does:** Evaluates the incoming prompt using Gemini 3.1 Flash-Lite to confirm that the query is programming-related or repository-related, consolidating validation and routing into a single LLM call to eliminate sequential latency. Constraints the response shape using a Pydantic model (`QueryClassification`).
 * **What it takes (Inputs):**
   * Raw user prompt.
 * **What it returns (Outputs):**
   * Boolean flag `is_valid` indicating validity.
+  * Preserved or classified `route` flag (`"direct_llm"` or `"repository_rag"` or `"invalid"`).
   * Rejection message `feedback` if the query is invalid (e.g., asking for weather or movie recommendations).
-* **Technical details:** Pass the query to Gemini 3.1 Flash-Lite with a system prompt specifying categorization rules. If invalid, the graph routes directly to a terminal node that outputs the feedback.
+* **Technical details:** Pass the query to Gemini 3.1 Flash-Lite with structured output matching a Pydantic `QueryClassification` model. Configure the LLM client with `max_output_tokens=50` to restrict the generated token counts and minimize latency. If validation fails, the graph routes directly to a terminal node that outputs the feedback.
 * **Interconnections & Data Flow:**
   * **Inputs from:** Raw query via LangGraph State (Phase 2.1).
-  * **Outputs to:** Validation results state update (`is_valid`) in LangGraph. If validation fails, triggers response feedback printing in CLI (Phase 8.3).
-  * **Integration Notes:** Dispatches all API requests through the central Fail-safe LLM Client (Phase 8.1).
+  * **Outputs to:** Validation results state update (`is_valid`, `route`) in LangGraph. If validation fails, triggers response feedback printing in CLI (Phase 8.3).
+  * **Integration Notes:** Dispatches all API requests through the central Fail-safe LLM Client (Phase 8.1). Provides fallback to text-generation if structured output is not supported by mock clients in testing.
 
 ### [x] 2.3: Intelligent Query Router
-* **What it does:** Categorizes valid coding queries into two paths: General Coding (answered directly) and Repository-Specific (requires RAG pipeline).
+* **What it does:** Categorizes valid coding queries into two paths: General Coding (answered directly) and Repository-Specific (requires RAG pipeline), by reading the cached route decision from the validation layer.
 * **What it takes (Inputs):**
-  * Valid user query.
+  * Valid user query and cached `route` from state.
 * **What it returns (Outputs):**
   * A routing flag: `"direct_llm"` or `"repository_rag"`.
-  * **Technical details:** Use Gemini 3.1 Flash-Lite to classify the query. For example, "What is encapsulation?" goes to `direct_llm`, whereas "Where is the DB configured?" goes to `repository_rag`.
+* **Technical details:** Uses the cached route from the state (assigned during validation) to bypass a second network round-trip. If the route is not present in the state (e.g., in fallback scenarios), calls Gemini 3.1 Flash-Lite to classify the query.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Verified query from State after Query Validation (Phase 2.2) succeeds.
+  * **Inputs from:** Verified query and cached `route` from State after Query Validation (Phase 2.2) succeeds.
   * **Outputs to:** Controls the conditional edge route in LangGraph: routing to Direct LLM Responder (Phase 2.4) or Hybrid Retriever (Phase 3.2).
   * **Integration Notes:** Performs model queries via the Fail-safe LLM Client (Phase 8.1).
 

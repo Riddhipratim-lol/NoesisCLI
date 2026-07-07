@@ -126,13 +126,11 @@ The project aims to:
 # Complete Workflow
 
 ## Phase 1 — User Query Validation
+Every interaction begins with a lightweight validation and routing stage consolidated into a single call powered by the cost-effective and low-latency **Gemini 3.1 Flash-Lite** model. This prevents sequential LLM execution latency and minimizes cold start times. To achieve peak efficiency, this node utilizes native Pydantic structured outputs (binding to a `QueryClassification` model) and restricts generation limits to `max_output_tokens=50` to minimize execution latency.
 
-Every interaction begins with a lightweight validation stage powered by the cost-effective and low-latency **Gemini 3.1 Flash-Lite** model.
-
-The system first determines whether the user's prompt is actually related to programming or software development.
+The system evaluates the query in one step to determine both its validity (whether the prompt is programming/software-related) and its target routing target.
 
 Examples of valid queries:
-
 - Explain recursion.
 - How does dependency injection work?
 - Where is authentication implemented in this repository?
@@ -140,47 +138,38 @@ Examples of valid queries:
 - What does this function do?
 
 Examples of invalid queries:
-
 - What's the weather today?
 - Recommend a movie.
 - Tell me a joke.
 
-If the query is not related to programming, the system does not continue further.
-
-Instead, it politely asks the user to provide a programming or repository-related question.
+If the query is not related to programming, the system does not continue further. Instead, it politely asks the user to provide a programming or repository-related question.
 
 ### Input
-
 Raw user prompt.
 
 ### Output
-
-- Valid coding query
+- Valid coding query (with pre-computed route)
 - Invalid query (request user to rephrase)
 
 ---
 
 ## Phase 2 — Intelligent Query Routing
+Once the query is validated and routed in the initial single-call optimization stage, the Router Node reads the cached routing decision from the graph's workflow state. If the cached decision is absent, it falls back to routing classification using **Gemini 3.1 Flash-Lite** with structured output support and a strict limit of `max_output_tokens=50` to maintain rapid routing speeds.
 
-Once a query is confirmed to be programming-related, NoesisCLI determines whether repository retrieval is actually required. This routing decision is performed by **Gemini 3.1 Flash-Lite** to maintain rapid routing speeds.
-
-Two categories of programming questions are supported.
+Two categories of programming questions are supported:
 
 ### General Programming Questions
-
 These are conceptual questions that do not depend on the contents of the repository.
 
 Examples:
-
 - What is polymorphism?
 - Explain Python decorators.
 - What is dependency injection?
 - Explain REST APIs.
 
-These questions are answered directly by the LLM without invoking the RAG pipeline.
+These questions are answered directly by the LLM (using Gemini 3.1 Flash-Lite) without invoking the RAG pipeline.
 
 Advantages:
-
 - Faster response
 - Lower latency
 - No retrieval overhead
@@ -189,11 +178,9 @@ Advantages:
 ---
 
 ### Repository-Specific Questions
-
 These questions require understanding the uploaded repository.
 
 Examples:
-
 - Explain the authentication flow.
 - Where is this API called?
 - How does the payment module work?
@@ -203,7 +190,6 @@ Examples:
 These queries are forwarded to the repository analysis pipeline.
 
 ### Output
-
 - Direct LLM route
 - Repository RAG route
 
@@ -725,7 +711,7 @@ The total generation time remains similar, but the user receives information imm
 
 # Key Features
 
-- Intelligent query validation and routing using Gemini 3.1 Flash-Lite
+- Consolidated query validation and routing using Gemini 3.1 Flash-Lite to eliminate sequential LLM latency
 - Multi-model architecture: Gemini 3.5 Flash for high-stakes reasoning/summarization, and Gemini 3.1 Flash-Lite for routing, validation, and fallback support
 - Automatic fallback: fallback to Gemini 3.1 Flash-Lite in case of Gemini 3.5 Flash API rate limits or failures
 - Automatic routing between direct LLM and RAG pipeline

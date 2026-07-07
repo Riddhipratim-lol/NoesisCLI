@@ -10,3 +10,4 @@ rich
 python-dotenv
 pytest
 voyageai
+pydantic
