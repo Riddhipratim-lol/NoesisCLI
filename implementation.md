@@ -135,10 +135,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 3 — Lexical Indexing & Hybrid Retrieval
+## [x] Phase 3 — Lexical Indexing & Hybrid Retrieval
 **Objective:** Implement keyword search alongside semantic search and combine them via rank fusion for optimal retrieval accuracy.
 
-### [ ] 3.1: Lexical BM25 Indexer
+### [x] 3.1: Lexical BM25 Indexer
 * **What it does:** Tokenizes and builds a BM25 keyword search index of the parsed code chunks.
 * **What it takes (Inputs):**
   * A list of Code Chunk objects.
@@ -149,7 +149,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2).
   * **Outputs to:** Saved BM25 index persisted/loaded via Directory Manager (Phase 7.2), and lexical match lookups evaluated in Hybrid Retriever (Phase 3.2).
 
-### [ ] 3.2: Hybrid Retriever with Rank Fusion
+### [x] 3.2: Hybrid Retriever with Rank Fusion
 * **What it does:** Executes semantic search (ChromaDB) and lexical search (BM25) in parallel, and merges the retrieved chunks using a fusion algorithm.
 * **What it takes (Inputs):**
   * User query.
