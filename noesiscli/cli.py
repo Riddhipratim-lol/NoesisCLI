@@ -1,8 +1,10 @@
 """
 CLI Entrypoint for NoesisCLI.
 Defines argparse commands:
-  - analyze: Ingest and index a local repository (ChromaDB + BM25).
-  - query:   Run a RAG query against the codebase using HybridRetriever.
+  - analyze: Ingest and index a local repository
+             (ChromaDB + BM25 + SymbolTable + DependencyGraph).
+  - query:   Run a RAG query against the codebase using HybridRetriever,
+             with Symbol Table and Dependency Graph loaded for Phase 6 pruning.
   - ask:     Ask a general programming question directly to the LLM.
 """
 
@@ -12,6 +14,8 @@ import os
 
 from noesiscli.parser.scanner import RepositoryScanner
 from noesiscli.parser.tree_sitter_parser import TreeSitterParser
+from noesiscli.parser.symbol_table import SymbolTable
+from noesiscli.parser.dependency_graph import DependencyGraph
 from noesiscli.indexing.embedding import EmbeddingGenerator
 from noesiscli.indexing.vector_store import ChromaVectorStore
 from noesiscli.indexing.bm25_store import BM25Store
@@ -28,6 +32,14 @@ def _chroma_path(repo_path: str) -> str:
 
 def _bm25_path(repo_path: str) -> str:
     return os.path.join(_noesis_dir(repo_path), "bm25.pkl")
+
+
+def _symbol_table_path(repo_path: str) -> str:
+    return os.path.join(_noesis_dir(repo_path), "symbol_table.pkl")
+
+
+def _dep_graph_path(repo_path: str) -> str:
+    return os.path.join(_noesis_dir(repo_path), "dependency_graph.pkl")
 
 
 def main():
@@ -87,7 +99,15 @@ def main():
         # Check for existing index (skip re-indexing unless --force)
         chroma_dir = _chroma_path(repo_path)
         bm25_file = _bm25_path(repo_path)
-        if os.path.isdir(chroma_dir) and os.path.isfile(bm25_file) and not args.force:
+        sym_table_file = _symbol_table_path(repo_path)
+        dep_graph_file = _dep_graph_path(repo_path)
+        if (
+            os.path.isdir(chroma_dir)
+            and os.path.isfile(bm25_file)
+            and os.path.isfile(sym_table_file)
+            and os.path.isfile(dep_graph_file)
+            and not args.force
+        ):
             print(
                 f"Index already exists at '{_noesis_dir(repo_path)}'.\n"
                 "Use '--force' to re-index."
@@ -136,6 +156,27 @@ def main():
         bm25_store.build(all_chunks)
         bm25_store.save(bm25_file)
         print(f"  → BM25 index saved to '{bm25_file}'")
+
+        # 6. Build and persist the Global Symbol Table  (Phase 4.1)
+        print("\nBuilding Global Symbol Table...")
+        sym_table = SymbolTable()
+        sym_table.build(all_chunks)
+        sym_table.save(sym_table_file)
+        print(
+            f"  → Symbol Table saved to '{sym_table_file}' "
+            f"({len(sym_table)} definitions across "
+            f"{len(sym_table.all_names())} unique names)"
+        )
+
+        # 7. Build and persist the Codebase Dependency Graph  (Phase 4.2)
+        print("Building Codebase Dependency Graph...")
+        dep_graph = DependencyGraph()
+        dep_graph.build(all_chunks, sym_table)
+        dep_graph.save(dep_graph_file)
+        print(
+            f"  → Dependency Graph saved to '{dep_graph_file}' "
+            f"({dep_graph.node_count()} nodes, {dep_graph.edge_count()} edges)"
+        )
 
         print("\nIndexing completed successfully.")
         return all_chunks
@@ -199,7 +240,60 @@ def main():
                 top_k=5,
             )
 
-            wf_graph = WorkflowGraph(llm_client=client, retriever=retriever)
+            # Load Symbol Table (Phase 4.1)
+            sym_table_file = os.path.join(repo_root, ".noesis", "symbol_table.pkl")
+            symbol_table = None
+            if os.path.isfile(sym_table_file):
+                try:
+                    symbol_table = SymbolTable.load(sym_table_file)
+                    print(
+                        f"[Phase 4] Loaded Symbol Table "
+                        f"({len(symbol_table)} definitions, "
+                        f"{len(symbol_table.all_names())} unique names)."
+                    )
+                except Exception as exc:
+                    print(
+                        f"[Warning] Could not load Symbol Table: {exc}. "
+                        "Proceeding without symbol resolution.",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    "[Warning] Symbol Table not found — run 'noesiscli analyze' "
+                    "to enable Phase 6 context pruning.",
+                    file=sys.stderr,
+                )
+
+            # Load Dependency Graph (Phase 4.2)
+            dep_graph_file = os.path.join(repo_root, ".noesis", "dependency_graph.pkl")
+            dep_graph = None
+            if os.path.isfile(dep_graph_file):
+                try:
+                    dep_graph = DependencyGraph.load(dep_graph_file)
+                    print(
+                        f"[Phase 4] Loaded Dependency Graph "
+                        f"({dep_graph.node_count()} nodes, "
+                        f"{dep_graph.edge_count()} edges)."
+                    )
+                except Exception as exc:
+                    print(
+                        f"[Warning] Could not load Dependency Graph: {exc}. "
+                        "Proceeding without dependency resolution.",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    "[Warning] Dependency Graph not found — run 'noesiscli analyze' "
+                    "to enable Phase 6 context pruning.",
+                    file=sys.stderr,
+                )
+
+            wf_graph = WorkflowGraph(
+                llm_client=client,
+                retriever=retriever,
+                symbol_table=symbol_table,
+                dep_graph=dep_graph,
+            )
             route = "repository_rag"
 
         else:
@@ -214,6 +308,8 @@ def main():
             "route": route,
             "context_chunks": [],
             "response": "",
+            "symbol_table": None,
+            "dep_graph": None,
         }
 
         final_state = graph.invoke(initial_state)

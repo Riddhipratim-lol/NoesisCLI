@@ -166,10 +166,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 4 — Symbol Table & Dependency Graph Construction
+## [x] Phase 4 — Symbol Table & Dependency Graph Construction
 **Objective:** Parse codebase relationships (imports, call chains, inheritance) to build a relational map of the code.
 
-### [ ] 4.1: Global Symbol Table Builder
+### [x] 4.1: Global Symbol Table Builder
 * **What it does:** Extracts declarations of all classes, methods, functions, and interfaces, mapping symbol names to their signatures, enclosing classes/scopes, file paths, and visibility.
 * **What it takes (Inputs):**
   * Structured Code Chunks (from Phase 1.2 / Phase 5.2).
@@ -181,7 +181,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Outputs to:** In-memory references used by Dependency Graph Constructor (Phase 4.2) and Dependency Context Resolver (Phase 6.1).
   * **Integration Notes:** Saved and loaded from the `.noesis/` directory via Directory & Persistence Manager (Phase 7.2).
 
-### [ ] 4.2: Codebase Dependency Graph Constructor
+### [x] 4.2: Codebase Dependency Graph Constructor
 * **What it does:** Scans imports and function call patterns, creating connections between files and symbols across the entire repository.
 * **What it takes (Inputs):**
   * Structured Code Chunks (including dedicated `imports` chunks).

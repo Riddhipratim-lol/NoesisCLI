@@ -29,7 +29,7 @@ def _tokenize(text: str) -> List[str]:
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     # Lowercase and split on any non-alphanumeric run
     tokens = re.split(r"[^a-zA-Z0-9]+", text.lower())
-    # Filter out empty tokens and pure numeric tokens under length 2
+    # Filter out empty tokens and pure numeric tokens under length 2. Removes empty strings and one letter tokens
     return [t for t in tokens if t and len(t) >= 2]
 
 

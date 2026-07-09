@@ -4,6 +4,8 @@ Hooks up:
   - LangGraph Conditional Router
   - Direct LLM Node
   - Repository RAG Node (backed by HybridRetriever when available)
+  - Phase 4 structures (SymbolTable, DependencyGraph) threaded through
+    WorkflowState for consumption by Phase 6 (Context Pruner).
 """
 
 import sys
@@ -32,9 +34,12 @@ class WorkflowGraph:
                     (Phase 3) or the plain ``ChromaVectorStore`` (Phase 1 fallback).
     """
 
-    def __init__(self, llm_client=None, retriever=None):
+    def __init__(self, llm_client=None, retriever=None, symbol_table=None, dep_graph=None):
         self.llm_client = llm_client or GeminiClient()
         self.retriever = retriever
+        # Phase 4 relational structures — passed through to state for Phase 6
+        self.symbol_table = symbol_table
+        self.dep_graph = dep_graph
 
         from noesiscli.config import GEMINI_3_1_FLASH_LITE
         direct_client = llm_client or GeminiClient(primary_model=GEMINI_3_1_FLASH_LITE)
@@ -98,7 +103,13 @@ class WorkflowGraph:
             sys.stdout.flush()
             full_response.append(token)
         print()
-        return {"response": "".join(full_response), "context_chunks": chunks}
+        return {
+            "response": "".join(full_response),
+            "context_chunks": chunks,
+            # Propagate Phase 4 structures so they remain in state for Phase 6
+            "symbol_table": self.symbol_table,
+            "dep_graph": self.dep_graph,
+        }
 
     # ------------------------------------------------------------------
     # Graph Compilation
@@ -127,3 +138,15 @@ class WorkflowGraph:
         builder.add_edge("rag_node", END)
 
         return builder.compile()
+
+    # ------------------------------------------------------------------
+    # Phase 4 structure accessors (consumed by Phase 6)
+    # ------------------------------------------------------------------
+
+    def get_symbol_table(self):
+        """Return the loaded SymbolTable, or None if not available."""
+        return self.symbol_table
+
+    def get_dep_graph(self):
+        """Return the loaded DependencyGraph, or None if not available."""
+        return self.dep_graph
