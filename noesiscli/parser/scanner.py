@@ -22,24 +22,9 @@ class RepositoryScanner:
         else:
             self.ignore_dirs = set(ignore_dirs)
 
-        # Supported file extensions for Python, JS, TS, Go, Java, C++
+        # Supported file extensions
         self.supported_extensions = {
             ".py",
-            ".js",
-            ".jsx",
-            ".mjs",
-            ".cjs",
-            ".ts",
-            ".tsx",
-            ".go",
-            ".java",
-            ".cpp",
-            ".cc",
-            ".cxx",
-            ".c",
-            ".h",
-            ".hpp",
-            ".hxx",
         }
 
     def scan(self, repo_path: str) -> list[str]:

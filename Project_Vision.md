@@ -2,11 +2,11 @@
 
 ## Overview
 
-NoesisCLI is an AI-powered Local Codebase Architect designed to help developers understand large software repositories without manually reading thousands of lines of source code.
+NoesisCLI is an AI-powered Local Codebase Architect designed to help developers understand large Python software repositories without manually reading thousands of lines of source code.
 
 Traditional Retrieval-Augmented Generation (RAG) systems treat source code as plain text and split it into arbitrary character chunks. This often breaks functions, loses semantic boundaries, and retrieves incomplete logic, resulting in inaccurate responses.
 
-NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing with Tree-sitter. Instead of chunking code by character count, it understands programming language structure (supporting Python, JavaScript, TypeScript, Go, Java, and C++) and indexes complete functions, classes, methods, interfaces, and modules. To optimize ingestion performance, parsing is distributed in parallel across multiple CPU cores.
+NoesisCLI solves this problem by performing syntax-aware indexing using Abstract Syntax Tree (AST) parsing with Tree-sitter. Instead of chunking code by character count, it understands Python code structure and indexes complete functions, classes, methods, and modules. To optimize ingestion performance, parsing is distributed in parallel across multiple CPU cores.
 
 During indexing, the system constructs a global Symbol Table and a directed Dependency Graph to track imports, inheritance, and function call chains, generating embeddings in batches using the Voyage AI API with the `voyage-code-3` model.
 
@@ -149,16 +149,7 @@ Example:
 noesiscli analyze ~/Projects/MyApplication
 ```
 
-The repository scanner recursively traverses the directory structure and identifies supported programming language files.
-
-Examples include:
-
-- Python
-- Java
-- JavaScript
-- TypeScript
-- C++
-- Go
+The repository scanner recursively traverses the directory structure and identifies Python files (`.py`).
 
 At this stage no code understanding occurs.
 

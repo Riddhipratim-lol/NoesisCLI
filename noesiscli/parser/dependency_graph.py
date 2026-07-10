@@ -24,7 +24,7 @@ Node types stored as node attributes:
   ``file_path``  — absolute source path (where applicable)
 
 Data flow:
-  Input:  Code Chunk dicts (Phase 1.2 / 5.2) + SymbolTable (Phase 4.1).
+  Input:  Code Chunk dicts (Phase 1.2 / Phase 5.1) + SymbolTable (Phase 4.1).
   Output: DependencyGraph instance, serialized to `.noesis/dependency_graph.pkl`.
           Consumed by DependencyContextResolver (Phase 6.1).
 """

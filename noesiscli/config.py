@@ -19,10 +19,5 @@ DEFAULT_STORAGE_DIR = ".noesis"
 
 # Supported Programming Languages & extensions
 SUPPORTED_LANGUAGES = {
-    "python": [".py"],
-    "javascript": [".js", ".jsx"],
-    "typescript": [".ts", ".tsx"],
-    "go": [".go"],
-    "java": [".java"],
-    "cpp": [".cpp", ".cc", ".cxx", ".h", ".hpp"]
+    "python": [".py"]
 }

@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import MagicMock
 
-# Try to import, otherwise skip tests or mock imports
 try:
-    from noesiscli.retrieval.fusion import HybridRetriever
+    from noesiscli.retrieval.fusion import HybridRetriever, reciprocal_rank_fusion
 except ImportError:
     HybridRetriever = None
+    reciprocal_rank_fusion = None
 
 try:
     from noesiscli.retrieval.pruner import ContextPruner
@@ -13,7 +13,7 @@ except ImportError:
     ContextPruner = None
 
 
-@pytest.mark.skipif(HybridRetriever is None, reason="HybridRetriever not implemented")
+@pytest.mark.skipif(reciprocal_rank_fusion is None, reason="reciprocal_rank_fusion not implemented")
 def test_hybrid_retriever_rrf(mock_code_chunks):
     """Test Reciprocal Rank Fusion (RRF) fusion and deduplication algorithm."""
     # Chunk 1: Vector rank 1, BM25 rank 2
@@ -23,8 +23,7 @@ def test_hybrid_retriever_rrf(mock_code_chunks):
     vector_results = [mock_code_chunks[0], mock_code_chunks[1]]
     bm25_results = [mock_code_chunks[1], mock_code_chunks[0]]
     
-    retriever = HybridRetriever(k=60)
-    merged_results = retriever.fuse(vector_results, bm25_results, top_k=2)
+    merged_results = reciprocal_rank_fusion([vector_results, bm25_results], k=60)
     
     assert len(merged_results) == 2
     # Ensure they have a fusion score and are deduplicated

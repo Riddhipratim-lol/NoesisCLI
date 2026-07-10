@@ -452,12 +452,12 @@ The Python Tree-sitter grammar wraps almost all statements in an `expression_sta
 
 ---
 
-## Known Limitations (Phase 1.2)
+## Design Scope & Known Limitations (Phase 1.2)
 
 > [!WARNING]
-> These limitations are intentional deferrals, not bugs. They will be resolved in the phases noted.
+> The following limitations (other than Python-only scope) are intentional deferrals, not bugs. They will be resolved in later phases.
 
-- **Python only.** Multi-language support (JavaScript, TypeScript, Go, Java, C++) is deferred to **Phase 5.1**.
+- **Python only.** The system is strictly designed to parse Python files. Multi-language support is permanently out of scope.
 - **No nested function extraction.** Nested functions remain embedded in their parent's `code_content`. Phase 5 may add a `nested_function` chunk type with a `parent_function` reference field.
 - **`constant` classification is heuristic.** Annotated assignments (`x: int = 5`) and lowercase module-level assignments are always classified as `"global"`, not `"constant"`.
 - **`type_alias` relies on keyword matching.** A custom type alias that doesn't use standard `typing` module names will be classified as `"global"`.

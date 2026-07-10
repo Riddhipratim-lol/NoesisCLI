@@ -15,8 +15,8 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A list of absolute file paths to python files `List[str]`.
 * **Technical details:** Use Python's built-in `argparse` module and `os.walk` to scan directories.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** User shell execution commands parsed via CLI Layer (Phase 8.3).
-  * **Outputs to:** Parsed file paths list goes to Tree-sitter Parser (Phase 1.2 / Phase 5.2) for AST construction, raw source files go to Code Structure Pruner (Phase 7.2) for skeletal structure creation, and root path goes to Directory Manager (Phase 8.2) to specify the `.noesis/` storage location.
+  * **Inputs from:** User shell execution commands parsed via CLI Layer (Phase 7.3).
+  * **Outputs to:** Parsed file paths list goes to Tree-sitter Parser (Phase 1.2 / Phase 5.1) for AST construction, raw source files go to Code Structure Pruner (Phase 6.2) for skeletal structure creation, and root path goes to Directory Manager (Phase 7.2) to specify the `.noesis/` storage location.
 
 ### [x] 1.2: Tree-Sitter Parser & Base Semantic Chunker
 * **What it does:** Uses Tree-sitter to parse Python files into ASTs, extracting modules, class definitions, method definitions, functions, imports, constants, type aliases, and global blocks as semantic chunks. Preserves decorators, async structures, and exact block line ranges without splitting by character counts.
@@ -45,7 +45,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Interconnections & Data Flow:**
   * **Inputs from:** List of file paths from CLI Setup & Ingestion (Phase 1.1).
   * **Outputs to:** Voyage AI Embedding Generator (Phase 1.3) and Dense Vector Storage (Phase 1.4) during basic RAG.
-  * **Integration Notes:** Acts as the foundation for the Parallel Multi-Language Parser Pipeline (Phase 5) and BM25 indexing (Phase 3.1).
+  * **Integration Notes:** Acts as the foundation for the Parallel Parser Pipeline (Phase 5) and BM25 indexing (Phase 3.1).
 
 ### [x] 1.3: Voyage AI Embedding Generator
 * **What it does:** Generates embeddings in batches using Voyage AI's `voyage-code-3` API call model.
@@ -55,7 +55,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A list of floating-point embedding vectors `List[List[float]]` corresponding to each chunk.
 * **Technical details:** Use the `voyageai` client library or direct HTTP requests to call the Voyage AI embedding API, passing inputs in batches to maximize throughput.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2) during ingestion. User queries (Phase 1.5 / Phase 3.2) during retrieval.
+  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.1) during ingestion. User queries (Phase 1.5 / Phase 3.2) during retrieval.
   * **Outputs to:** Dense Vector Storage (Phase 1.4) to write code embeddings.
 
 ### [x] 1.4: Dense Vector Storage (ChromaDB)
@@ -66,7 +66,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A persistent ChromaDB database saved on disk under the repository's `.noesis/` directory.
 * **Technical details:** Use the `chromadb` client to manage a local SQLite-backed collection.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Embeddings from Voyage AI Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 5.2).
+  * **Inputs from:** Embeddings from Voyage AI Generator (Phase 1.3) and chunks from Chunker (Phase 1.2 / Phase 5.1).
   * **Outputs to:** Similarity search query results for Basic Retrieval (Phase 1.5) and Hybrid Retriever (Phase 3.2).
   * **Integration Notes:** Database lifetime and serialization on disk are managed by Directory & Persistence Manager (Phase 7.2).
 
@@ -107,7 +107,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Initialized LangGraph state with `route` explicitly configured.
 * **Technical details:** Parse CLI subcommands using `argparse`. Ensure that `.noesis` directory check is only performed for `query` command.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** CLI User Interface (Phase 8.3).
+  * **Inputs from:** CLI User Interface (Phase 7.3).
   * **Outputs to:** LangGraph state initialization (Phase 2.1).
 
 ### [x] 2.3: LangGraph Conditional Router
@@ -146,7 +146,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A serialized BM25 index file stored in `.noesis/bm25.pkl`.
 * **Technical details:** Use a library like `rank_bm25` or build a custom BM25 index. Use python's `pickle` or a dedicated library to save/load it.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.2).
+  * **Inputs from:** Code chunks (Phase 1.2 / Phase 5.1).
   * **Outputs to:** Saved BM25 index persisted/loaded via Directory Manager (Phase 7.2), and lexical match lookups evaluated in Hybrid Retriever (Phase 3.2).
 
 ### [x] 3.2: Hybrid Retriever with Rank Fusion
@@ -172,12 +172,12 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 ### [x] 4.1: Global Symbol Table Builder
 * **What it does:** Extracts declarations of all classes, methods, functions, and interfaces, mapping symbol names to their signatures, enclosing classes/scopes, file paths, and visibility.
 * **What it takes (Inputs):**
-  * Structured Code Chunks (from Phase 1.2 / Phase 5.2).
+  * Structured Code Chunks (from Phase 1.2 / Phase 5.1).
 * **What it returns (Outputs):**
   * A Global Symbol Table registry: a dictionary mapping `symbol_name -> List[SymbolDefinition]`.
 * **Technical details:** Walk the parsed code chunks (filtering by `class`, `method`, and `function` types) to capture signatures, enclosing scopes, and line locations. Write a fast-lookup data structure that can search symbols by name (case-sensitive and case-insensitive).
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2).
+  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.1).
   * **Outputs to:** In-memory references used by Dependency Graph Constructor (Phase 4.2) and Dependency Context Resolver (Phase 6.1).
   * **Integration Notes:** Saved and loaded from the `.noesis/` directory via Directory & Persistence Manager (Phase 7.2).
 
@@ -190,28 +190,16 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * A directed codebase graph (`networkx.DiGraph`). Nodes represent files/classes/functions, and edges represent imports, function calls, or inheritance relations.
 * **Technical details:** Use `networkx` to build and query the graph. Scan the aggregated `imports` chunks to map out file-to-file import relationships. For each function and class chunk, search for function calls/method invocation patterns that match symbols in the global Symbol Table to map out granular dependency edges.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.2) and Global Symbol Table (Phase 4.1).
+  * **Inputs from:** Code Chunk structures (Phase 1.2 / Phase 5.1) and Global Symbol Table (Phase 4.1).
   * **Outputs to:** Dependency Context Resolver (Phase 6.1) for relational search.
   * **Integration Notes:** Serialized on disk and restored on start by Directory & Persistence Manager (Phase 7.2).
 
 ---
 
-## [ ] Phase 5 — Multi-Language Support & Parallel Processing
-**Objective:** Scale the parsing architecture to parse multiple languages concurrently across multiple CPU cores.
+## [ ] Phase 5 — Parallel Processing Parser Pipeline
+**Objective:** Scale the parsing architecture to parse Python files concurrently across multiple CPU cores.
 
-### [ ] 5.1: Multi-Language Tree-Sitter Integration
-* **What it does:** Configures Tree-sitter parsers and queries for other popular languages like JavaScript, TypeScript, Go, Java, and C++.
-* **What it takes (Inputs):**
-  * Source files of various file extensions (`.py`, `.js`, `.ts`, `.go`, `.java`, `.cpp`, `.h`).
-* **What it returns (Outputs):**
-  * Language-specific structured AST nodes and chunks (including functional definitions and global/module-level code chunks).
-* **Technical details:** Compile and load Tree-sitter grammars dynamically for each extension. Write specific parser rules or queries for each language to extract symbols (functions/classes/methods/interfaces/global chunks) accurately.
-* **Interconnections & Data Flow:**
-  * **Inputs from:** Scan list of files from CLI Ingestion (Phase 1.1).
-  * **Outputs to:** Parsed structures sent to worker subprocesses of Multiprocessing Parser Pipeline (Phase 5.2).
-  * **Integration Notes:** Scales and replaces the Python-only parser prototype in Phase 1.2.
-
-### [ ] 5.2: Multiprocessing Parser Pipeline
+### [ ] 5.1: Multiprocessing Parser Pipeline
 * **What it does:** Distributes parsing tasks across all available CPU cores using python's multiprocessing module to significantly speed up indexing.
 * **What it takes (Inputs):**
   * A list of file paths to parse.
@@ -219,7 +207,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Aggregated list of structured Code Chunks.
 * **Technical details:** Implement a worker function that receives a file path, parses it using the Tree-sitter parser to extract structured Code Chunks, and returns them. Use `multiprocessing.Pool` or `concurrent.futures.ProcessPoolExecutor` with batching to minimize process communication overhead.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Ingestion file list (Phase 1.1) and parser configurations (Phase 5.1).
+  * **Inputs from:** Ingestion file list (Phase 1.1).
   * **Outputs to:** Feeds aggregated parsing data to Symbol Table Builder (Phase 4.1), Dependency Graph Constructor (Phase 4.2), and Semantic Chunker (Phase 1.2).
   * **Integration Notes:** Standardizes the high-throughput parallel ingestion pipeline of NoesisCLI.
 
@@ -250,7 +238,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * Pruned code blocks representing the codebase structures.
 * **Technical details:** Leverage pre-computed `class_header` chunks when generating the skeletal/signature-only representations of unretrieved reference classes, and surgically replace method bodies in retrieved modules using Tree-sitter.
 * **Interconnections & Data Flow:**
-  * **Inputs from:** Target/reference lists (Phase 6.1) and raw source files (Phase 1.1). Leverages Tree-sitter parsers (Phase 1.2 / Phase 5.1).
+  * **Inputs from:** Target/reference lists (Phase 6.1) and raw source files (Phase 1.1). Leverages Tree-sitter parser (Phase 1.2).
   * **Outputs to:** Skeletal pruned code context blocks sent to Prompt Constructor (Phase 6.3).
 
 ### [ ] 6.3: Prompt Constructor
@@ -303,7 +291,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 * **Technical details:** Use a library like `rich` or standard ANSI escape codes to render progress bars and pretty-print the markdown response stream.
 * **Interconnections & Data Flow:**
   * **Inputs from:** User terminal prompts, and streamed tokens from Fail-safe LLM Client (Phase 7.1).
-  * **Outputs to:** Triggers repository analysis scanner (Phase 1.1 / Phase 5.2) and initializes LangGraph Workflow execution (Phase 2.1).
+  * **Outputs to:** Triggers repository analysis scanner (Phase 1.1 / Phase 5.1) and initializes LangGraph Workflow execution (Phase 2.1).
 
 ---
 

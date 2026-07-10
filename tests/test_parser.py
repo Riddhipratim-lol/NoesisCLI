@@ -38,7 +38,6 @@ def test_repository_scanner(temp_repo):
     # Check that we found the python file and JS file in src
     basenames = [os.path.basename(f) for f in files]
     assert "user_service.py" in basenames
-    assert "math.js" in basenames
     assert "ignored.py" not in basenames
 
 
@@ -335,7 +334,7 @@ def test_cli_query(mock_isdir, mock_gemini_client_class, mock_chroma_store_class
         assert len(results) == 1
         assert results[0]["code_content"] == "def test_func(): pass"
         
-        mock_store.query.assert_called_once_with("How does test_func work?", top_k=3)
+        mock_store.query.assert_called_once_with("How does test_func work?", 5)
         mock_gemini.stream.assert_called_once()
 
 

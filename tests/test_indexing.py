@@ -67,12 +67,13 @@ def test_chroma_vector_store(mock_client, mock_code_chunks):
 @patch("builtins.open", new_callable=mock_open)
 @patch("pickle.dump")
 @patch("pickle.load")
-def test_bm25_store(mock_pickle_load, mock_pickle_dump, mock_file, mock_code_chunks):
+@patch("os.path.exists", return_value=True)
+def test_bm25_store(mock_exists, mock_pickle_load, mock_pickle_dump, mock_file, mock_code_chunks):
     """Test BM25 serialization, deserialization, and lexical search."""
     store = BM25Store()
     
     # Index documents
-    store.index(mock_code_chunks)
+    store.build(mock_code_chunks)
     
     # Save index
     store.save(".noesis/bm25.pkl")
@@ -80,7 +81,11 @@ def test_bm25_store(mock_pickle_load, mock_pickle_dump, mock_file, mock_code_chu
     mock_pickle_dump.assert_called_once()
     
     # Mock load
-    mock_pickle_load.return_value = store
+    mock_pickle_load.return_value = {
+        "chunks": mock_code_chunks,
+        "tokenized_corpus": [],
+        "bm25": store.bm25,
+    }
     loaded_store = BM25Store.load(".noesis/bm25.pkl")
     assert loaded_store is not None
     

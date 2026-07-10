@@ -11,7 +11,7 @@ The registry supports:
   - Pickle-based persistence to `.noesis/symbol_table.pkl`.
 
 Data flow:
-  Input:  List of Code Chunk dicts (Phase 1.2 / Phase 5.2 output).
+  Input:  List of Code Chunk dicts (Phase 1.2 / Phase 5.1 output).
   Output: SymbolTable instance (in-memory dict + serializable to disk).
           Consumed by DependencyGraph (Phase 4.2) and Context Pruner (Phase 6.1).
 """

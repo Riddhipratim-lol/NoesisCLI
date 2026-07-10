@@ -11,9 +11,3 @@ python-dotenv
 pytest
 voyageai
 pydantic
-tree-sitter-javascript
-tree-sitter-typescript
-tree-sitter-go
-tree-sitter-java
-tree-sitter-cpp
-tree-sitter-c
