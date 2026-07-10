@@ -16,6 +16,12 @@ dependencies = [
     "rank-bm25>=0.2.2",
     "rich>=15.0.0",
     "tree-sitter>=0.25.2",
+    "tree-sitter-c>=0.24.2",
+    "tree-sitter-cpp>=0.23.4",
+    "tree-sitter-go>=0.25.0",
+    "tree-sitter-java>=0.23.5",
+    "tree-sitter-javascript>=0.25.0",
     "tree-sitter-python>=0.25.0",
+    "tree-sitter-typescript>=0.23.2",
     "voyageai>=0.4.1",
 ]
