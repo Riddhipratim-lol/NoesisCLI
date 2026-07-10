@@ -196,10 +196,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 5 — Parallel Processing Parser Pipeline
+## [x] Phase 5 — Parallel Processing Parser Pipeline
 **Objective:** Scale the parsing architecture to parse Python files concurrently across multiple CPU cores.
 
-### [ ] 5.1: Multiprocessing Parser Pipeline
+### [x] 5.1: Multiprocessing Parser Pipeline
 * **What it does:** Distributes parsing tasks across all available CPU cores using python's multiprocessing module to significantly speed up indexing.
 * **What it takes (Inputs):**
   * A list of file paths to parse.

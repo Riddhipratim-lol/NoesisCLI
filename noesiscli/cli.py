@@ -13,9 +13,9 @@ import sys
 import os
 
 from noesiscli.parser.scanner import RepositoryScanner
-from noesiscli.parser.tree_sitter_parser import TreeSitterParser
 from noesiscli.parser.symbol_table import SymbolTable
 from noesiscli.parser.dependency_graph import DependencyGraph
+from noesiscli.parser.parallel import ParallelParserPipeline
 from noesiscli.indexing.embedding import EmbeddingGenerator
 from noesiscli.indexing.vector_store import ChromaVectorStore
 from noesiscli.indexing.bm25_store import BM25Store
@@ -59,6 +59,16 @@ def main():
         "--force",
         action="store_true",
         help="Re-index the repository even if an existing index is found",
+    )
+    analyze_parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Number of parallel worker processes for Phase 5.1 parsing "
+            "(default: all available CPU cores)"
+        ),
     )
 
     # ------------------------------------------------------------------ #
@@ -114,50 +124,116 @@ def main():
             )
             return
 
-        # 1. Scan repository for source files
+        # ---------------------------------------------------------------- #
+        # Step 1 — Scan repository for source files (Phase 1.1)            #
+        # ---------------------------------------------------------------- #
         scanner = RepositoryScanner()
         files = scanner.scan(repo_path)
-        print(f"Found {len(files)} source files in {repo_path}:")
-        for f in files:
-            print(f"  {f}")
-
-        # 2. Filter Python files and parse with Tree-sitter
         python_files = [f for f in files if f.endswith(".py")]
-        tree_parser = TreeSitterParser(language="python")
-        all_chunks = []
-        for f in python_files:
-            chunks = tree_parser.parse_file(f)
-            all_chunks.extend(chunks)
+
+        print(f"Found {len(files)} source file(s) in {repo_path}.")
+        print(f"  → {len(python_files)} Python file(s) selected for parsing.")
+
+        if not python_files:
+            print("No Python files found — nothing to index.")
+            return []
+
+        # ---------------------------------------------------------------- #
+        # Step 2 — Parallel AST Parsing (Phase 5.1)                        #
+        # ---------------------------------------------------------------- #
+        pipeline = ParallelParserPipeline(max_workers=args.workers)
+        num_workers = pipeline.max_workers
+        effective_workers = min(num_workers, len(python_files))
 
         print(
-            f"\nParsed {len(python_files)} Python file(s) into "
-            f"{len(all_chunks)} semantic chunk(s)."
+            f"\n[Phase 5.1] Parallel AST parsing — "
+            f"{effective_workers} worker(s) / {len(python_files)} file(s)"
+        )
+
+        # Use Rich progress bar when available, otherwise simple counter
+        try:
+            from rich.progress import (
+                Progress,
+                SpinnerColumn,
+                BarColumn,
+                TextColumn,
+                TimeElapsedColumn,
+                MofNCompleteColumn,
+            )
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold cyan]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+            ) as progress:
+                task = progress.add_task(
+                    f"Parsing with {effective_workers} worker(s)",
+                    total=len(python_files),
+                )
+
+                def _rich_callback(completed: int, total: int) -> None:
+                    progress.update(task, completed=completed)
+
+                all_chunks = pipeline.parse_files(
+                    python_files, progress_callback=_rich_callback
+                )
+
+        except ImportError:
+            # Fallback: plain text progress
+            _completed_ref = [0]
+
+            def _plain_callback(completed: int, total: int) -> None:
+                _completed_ref[0] = completed
+                print(
+                    f"\r  Parsed {completed}/{total} file(s)...",
+                    end="",
+                    flush=True,
+                )
+
+            all_chunks = pipeline.parse_files(
+                python_files, progress_callback=_plain_callback
+            )
+            print()  # newline after \r sequence
+
+        print(
+            f"\n  → Produced {len(all_chunks)} semantic chunk(s) from "
+            f"{len(python_files)} file(s)."
         )
 
         if not all_chunks:
             print("No chunks produced — nothing to index.")
             return all_chunks
 
-        # 3. Generate embeddings (Voyage AI)
+        # ---------------------------------------------------------------- #
+        # Step 3 — Generate embeddings (Phase 1.3)                         #
+        # ---------------------------------------------------------------- #
         print("\nGenerating embeddings using Voyage AI...")
         embed_gen = EmbeddingGenerator()
         embeddings = embed_gen.embed_chunks(all_chunks)
 
-        # 4. Persist to ChromaDB
+        # ---------------------------------------------------------------- #
+        # Step 4 — Persist to ChromaDB (Phase 1.4)                         #
+        # ---------------------------------------------------------------- #
         print("Indexing chunks into ChromaDB...")
         os.makedirs(os.path.dirname(chroma_dir), exist_ok=True)
         vector_store = ChromaVectorStore(persist_directory=chroma_dir)
         vector_store.add_chunks(all_chunks, embeddings)
         print(f"  → ChromaDB index saved to '{chroma_dir}'")
 
-        # 5. Build and persist the BM25 lexical index  (Phase 3.1)
+        # ---------------------------------------------------------------- #
+        # Step 5 — Build and persist BM25 lexical index (Phase 3.1)        #
+        # ---------------------------------------------------------------- #
         print("Building BM25 lexical index...")
         bm25_store = BM25Store()
         bm25_store.build(all_chunks)
         bm25_store.save(bm25_file)
         print(f"  → BM25 index saved to '{bm25_file}'")
 
-        # 6. Build and persist the Global Symbol Table  (Phase 4.1)
+        # ---------------------------------------------------------------- #
+        # Step 6 — Build and persist Global Symbol Table (Phase 4.1)       #
+        # ---------------------------------------------------------------- #
         print("\nBuilding Global Symbol Table...")
         sym_table = SymbolTable()
         sym_table.build(all_chunks)
@@ -168,7 +244,9 @@ def main():
             f"{len(sym_table.all_names())} unique names)"
         )
 
-        # 7. Build and persist the Codebase Dependency Graph  (Phase 4.2)
+        # ---------------------------------------------------------------- #
+        # Step 7 — Build and persist Codebase Dependency Graph (Phase 4.2) #
+        # ---------------------------------------------------------------- #
         print("Building Codebase Dependency Graph...")
         dep_graph = DependencyGraph()
         dep_graph.build(all_chunks, sym_table)

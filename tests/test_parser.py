@@ -24,7 +24,7 @@ except ImportError:
     DependencyGraphBuilder = None
 
 try:
-    from noesiscli.parser.parallel import ParallelParser
+    from noesiscli.parser.parallel import ParallelParserPipeline as ParallelParser
 except ImportError:
     ParallelParser = None
 
@@ -108,21 +108,34 @@ def test_dependency_graph_builder(mock_code_chunks):
 
 
 @pytest.mark.skipif(ParallelParser is None, reason="ParallelParser not implemented")
-@patch("multiprocessing.Pool")
-def test_parallel_parser(mock_pool):
-    """Test that ParallelParser distributes file parsing across multiprocessing pool."""
-    # Setup mock pool return
-    mock_instance = mock_pool.return_value
-    mock_instance.map.return_value = [[{"node_type": "function", "code_content": "def parallel_func(): pass"}]]
-    
-    parser = ParallelParser(num_cores=2)
-    files = ["/mock/file1.py", "/mock/file2.py"]
-    
-    results = parser.parse_files(files)
-    
+def test_parallel_parser(tmp_path):
+    """Test that ParallelParserPipeline distributes file parsing across workers and returns correct chunks."""
+    # Create two small Python files
+    f1 = tmp_path / "alpha.py"
+    f1.write_text("def alpha_func():\n    pass\n")
+    f2 = tmp_path / "beta.py"
+    f2.write_text("class BetaClass:\n    def method(self):\n        pass\n")
+
+    pipeline = ParallelParser(max_workers=2)
+    results = pipeline.parse_files([str(f1), str(f2)])
+
     assert isinstance(results, list)
     assert len(results) > 0
-    mock_instance.map.assert_called_once()
+
+    # Verify chunk schema
+    required_keys = {"code_content", "file_path", "node_type", "start_line", "end_line", "metadata"}
+    for chunk in results:
+        assert required_keys.issubset(chunk.keys()), f"Chunk missing keys: {chunk}"
+
+    # Verify both files contributed chunks
+    file_paths = {chunk["file_path"] for chunk in results}
+    assert str(f1) in file_paths
+    assert str(f2) in file_paths
+
+    # Verify expected node types are present
+    node_types = {chunk["node_type"] for chunk in results}
+    assert "function" in node_types or "method" in node_types
+    assert "class" in node_types
 
 
 def test_cli_analyze(temp_repo):
