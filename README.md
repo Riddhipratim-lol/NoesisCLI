@@ -22,6 +22,20 @@ NoesisCLI turns any local Python codebase into a queryable knowledge base withou
 
 ---
 
+## Table of Contents
+
+- [Tech Stack](#tech-stack)
+- [System Architecture](#system-architecture)
+- [Features](#features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Testing](#testing)
+- [License](#license)
+
+---
+
 ## Tech Stack
 
 Every component in the table below is fully implemented in this project.
@@ -51,128 +65,65 @@ Every component in the table below is fully implemented in this project.
 
 ## System Architecture
 
-The system is organized into seven logical phases, implemented across six decoupled packages:
+NoesisCLI is built as a layered pipeline of seven tightly-specified phases, implemented across six decoupled Python packages. Each layer has a single responsibility and passes well-defined data structures to the next.
 
-```mermaid
-graph TD
-    CLI["🖥️ CLI Layer\ncli.py · argparse"] --> ANALYZE["analyze command"]
-    CLI --> QUERY["query command"]
-    CLI --> ASK["ask command"]
+### Layer 1 — CLI & Ingestion (`cli.py`, `parser/scanner.py`)
 
-    ANALYZE --> SCANNER["📂 RepositoryScanner\nparser/scanner.py"]
-    SCANNER --> PARALLEL["⚡ ParallelParserPipeline\nparser/parallel.py\nProcessPoolExecutor × N workers"]
-    PARALLEL --> TSPARSER["🌳 TreeSitterParser\nparser/tree_sitter_parser.py\nAST → Semantic Chunks"]
+The entry point is a standard `argparse`-based CLI (`cli.py`) exposing three subcommands: `analyze`, `query`, and `ask`. When `analyze` is invoked, `RepositoryScanner` performs a recursive `os.walk` over the target directory, collecting all `.py` file paths while filtering out `.git`, `.venv`, `__pycache__`, `node_modules`, `build`, and `dist` directories. The result is a sorted list of absolute paths that seeds every downstream phase.
 
-    TSPARSER --> EMBED["🔢 EmbeddingGenerator\nindexing/embedding.py\nVoyage AI voyage-code-3"]
-    TSPARSER --> BM25B["📝 BM25Store\nindexing/bm25_store.py\nBM25Okapi lexical index"]
-    TSPARSER --> SYMTBL["🗺️ SymbolTable\nparser/symbol_table.py\nGlobal symbol registry"]
-    TSPARSER --> DEPGPH["🔗 DependencyGraph\nparser/dependency_graph.py\nNetworkX DiGraph"]
+### Layer 2 — Parallel AST Parsing (`parser/parallel.py`, `parser/tree_sitter_parser.py`)
 
-    EMBED --> CHROMA["🗄️ ChromaVectorStore\nindexing/vector_store.py\nChromaDB SQLite"]
+Parsing is the most CPU-intensive step and is fully parallelized. `ParallelParserPipeline` distributes the file list across a `ProcessPoolExecutor` with up to N worker processes (default: all CPU cores, configurable via `--workers`). Each worker is a module-level function `_parse_file_worker` — a design requirement for picklability across process boundaries — that constructs its own `TreeSitterParser` instance and returns a list of Code Chunk dicts for its assigned file.
 
-    CHROMA --> NOESISDIR[".noesis/ on disk"]
-    BM25B --> NOESISDIR
-    SYMTBL --> NOESISDIR
-    DEPGPH --> NOESISDIR
+`TreeSitterParser` uses the `tree-sitter-python` grammar to walk the AST of each file and emit nine distinct chunk types: `module`, `imports`, `class`, `class_header`, `function`, `method`, `constant`, `type_alias`, and `global`. Every chunk carries a consistent schema: `code_content`, `file_path`, `node_type`, `start_line`, `end_line`, and a rich `metadata` dict containing `decorators`, `is_async`, `parent_class`, `is_dunder`, `special_type`, `docstring`, and `imports_in_file`. Four explicit parsing strategies (S1–S4) and six bug fixes are applied to handle decorated definitions, import isolation, async functions, nested functions, class-body traversal, and global node classification correctly.
 
-    QUERY --> HYBRID["🔍 HybridRetriever\nretrieval/fusion.py\nRRF k=60"]
-    NOESISDIR --> HYBRID
+A notable design point is the `class_header` chunk type: for every class, a second stub chunk is emitted containing only the class signature, docstring, and method signatures (no bodies). This pre-computed stub is consumed later by the Phase 6 pruner without any additional parsing.
 
-    HYBRID --> PRUNER["✂️ Phase 6 Pruning Pipeline\nretrieval/pruner.py"]
-    NOESISDIR --> PRUNER
+### Layer 3 — Indexing (`indexing/`)
 
-    PRUNER --> PROMPT["📋 PromptConstructor\nskeletal context prompt"]
-    PROMPT --> GEMINI["🤖 GeminiClient\nmodels/client.py\n3.1 Flash-Lite → 3.5 Flash fallback"]
+The aggregated chunk list flows into three independent index builders that run sequentially:
 
-    ASK --> DIRECT["💬 DirectResponder\npipeline/direct.py\nGemini 3.1 Flash-Lite"]
+**Voyage AI Embeddings** (`embedding.py`): The `code_content` strings of all chunks are sent to the Voyage AI `voyage-code-3` model in batches of 128 via the `voyageai` HTTP client. The model is specialized for code retrieval and produces 1536-dimensional vectors. A `progress_callback` mechanism keeps the Rich progress bar in sync with batch completion. During query time, the same client is called with `input_type="query"` instead of `"document"` to produce asymmetrically-optimized query vectors.
 
-    GEMINI --> UI["🎨 Rich Terminal UI\nutils/ui.py\nLive Markdown streaming"]
-    DIRECT --> UI
-```
+**ChromaDB Vector Store** (`vector_store.py`): `ChromaVectorStore` wraps a `chromadb.PersistentClient` backed by SQLite on disk at `.noesis/chroma/`. Each chunk is stored with its embedding and a flattened metadata dict (ChromaDB only accepts primitive scalar values, so nested structures like `imports_in_file` are JSON-serialized). The collection is named `noesis_code` and supports cosine similarity queries.
 
----
+**BM25 Lexical Index** (`bm25_store.py`): `BM25Store` builds a `rank_bm25.BM25Okapi` index over all chunk texts. Before indexing, a custom tokenizer splits on camelCase boundaries (`getUserId` → `["get", "user", "id"]`), lowercases, splits on non-alphanumeric runs, and filters tokens shorter than 2 characters. This maximizes recall for code-specific vocabulary. The index, tokenized corpus, and original chunks are pickled to `.noesis/bm25.pkl`.
 
-## Data Flow Diagrams
+### Layer 4 — Symbol Table & Dependency Graph (`parser/symbol_table.py`, `parser/dependency_graph.py`)
 
-### Indexing Pipeline (`analyze`)
+These two structures provide the relational layer that elevates NoesisCLI above a plain vector search tool.
 
-```mermaid
-flowchart LR
-    A[/"📁 Local Repository"/] -->|os.walk| B["RepositoryScanner\n.py files only"]
-    B -->|file paths| C["ParallelParserPipeline\nProcessPoolExecutor"]
-    C -->|N workers| D["TreeSitterParser\nAST chunking"]
-    D -->|"121+ semantic chunks\nmodule · class · function\nmethod · imports · constant"| E{Index Builders}
-    E -->|code_content strings| F["EmbeddingGenerator\nvoyage-code-3\nbatch=128"]
-    E -->|chunks| G["BM25Store\nBM25Okapi + tokenizer"]
-    E -->|class/method/function chunks| H["SymbolTable\nname → SymbolDefinition"]
-    E -->|imports + calls + inheritance| I["DependencyGraph\nNetworkX DiGraph"]
-    F -->|embeddings + chunks| J[("ChromaDB\n.noesis/chroma")]
-    G -->|serialized index| K[("BM25\n.noesis/bm25.pkl")]
-    H -->|pickled| L[("SymbolTable\n.noesis/symbol_table.pkl")]
-    I -->|pickled| M[("DepGraph\n.noesis/dependency_graph.pkl")]
-```
+**Global Symbol Table** (`symbol_table.py`): Iterates all chunks of type `class`, `method`, or `function` and registers each into a `dict[str, list[SymbolDefinition]]`. `SymbolDefinition` is a dataclass carrying `symbol_name`, `node_type`, `file_path`, `start_line`, `end_line`, `parent_class`, `signature`, `docstring`, `is_async`, `decorators`, and `base_classes`. The table supports exact case-sensitive lookup and case-insensitive fuzzy lookup. It is pickled to `.noesis/symbol_table.pkl`.
 
-### Query Pipeline (`query`)
+**Codebase Dependency Graph** (`dependency_graph.py`): Constructs a `networkx.DiGraph` with three categories of directed edges. Import edges (`relation="imports"`) connect each file node to the top-level module names extracted from its `imports` chunks using regex parsing of `import X` and `from X import Y` patterns (relative imports are skipped). Inheritance edges (`relation="inherits"`) connect class names to their base class names using the `base_classes` metadata from `class` chunks. Call edges (`relation="calls"`) are built by scanning the `code_content` of every function and method chunk with a regex for token patterns matching known symbol names in the Symbol Table — this is best-effort static analysis rather than full semantic resolution. The graph is pickled to `.noesis/dependency_graph.pkl`.
 
-```mermaid
-flowchart TD
-    Q[/"User: noesiscli query\n'How does auth work?'"/] --> LANGGRAPH["LangGraph StateGraph\nroute = repository_rag"]
+### Layer 5 — LangGraph Workflow Orchestration (`pipeline/`)
 
-    LANGGRAPH --> LOAD["Load from .noesis/\nChromaDB · BM25 · SymbolTable · DepGraph"]
+All query-time execution is orchestrated by a LangGraph `StateGraph`. The `WorkflowState` is a `TypedDict` carrying `query`, `route`, `context_chunks`, `response`, `symbol_table`, and `dep_graph`. Routing is deterministic: the `check_route()` function reads the `route` field set by the CLI and immediately directs execution to one of two nodes — `direct_llm_node` or `rag_node` — without any LLM-based classification step.
 
-    LOAD --> HYBRID["HybridRetriever.retrieve()"]
-    HYBRID --> DENSE["Dense Search\nChromaDB cosine similarity\n← Voyage AI query embedding"]
-    HYBRID --> LEXICAL["Lexical Search\nBM25Okapi keyword match"]
+The `ask` subcommand sets `route="direct_llm"` and the graph invokes `DirectResponder`, which calls `gemini-3.1-flash-lite` directly with a concise system prompt. The `query` subcommand sets `route="repository_rag"` and the graph invokes `RAGNode`, which coordinates retrieval, pruning, and LLM streaming. The SymbolTable and DependencyGraph are threaded through `WorkflowState` so they are available inside the RAG node without global state.
 
-    DENSE -->|top-k ranked| RRF["Reciprocal Rank Fusion\nRRF d = Σ 1 ÷ k + rank_m_d\nk = 60  ·  concurrent ThreadPoolExecutor"]
-    LEXICAL -->|top-k ranked| RRF
+### Layer 6 — Hybrid Retrieval (`retrieval/fusion.py`)
 
-    RRF -->|fused · deduplicated| DCR["DependencyContextResolver\nPhase 6.1\ntarget_symbols ∪ reference_symbols"]
-    DCR -->|symbol sets| CSP["CodeStructurePruner\nPhase 6.2\nfull bodies for targets\nsig + '...' for references"]
-    CSP -->|pruned blocks| PC["PromptConstructor\nPhase 6.3\npruned context + query"]
+`HybridRetriever` runs dense and lexical search concurrently in a `ThreadPoolExecutor` with two workers. The dense branch generates a query embedding via Voyage AI (`input_type="query"`) and queries ChromaDB for the top-k nearest neighbors by cosine similarity. The lexical branch tokenizes the query with the same camelCase-aware tokenizer and runs `BM25Okapi.get_scores()`, returning the top-k chunks by BM25 score. Both branches are submitted as futures and resolved; failures in either branch are caught and the other branch's results are used alone.
 
-    PC --> GC["GeminiClient\nPrimary: gemini-3.1-flash-lite"]
-    GC -->|rate limit / error| FB["Fallback: gemini-3.5-flash"]
-    GC -->|token stream| UI["Rich Terminal\nLive Markdown panel"]
-    FB -->|token stream| UI
-```
+Results from both branches are merged by `reciprocal_rank_fusion()`, which implements the standard RRF formula with `k=60`: for each document appearing in any ranked list, its RRF score is the sum of `1 / (60 + rank)` across all lists. Documents are deduplicated by a `file_path:start_line:end_line:node_type` key before scoring. The final merged list is sorted by descending RRF score, capped at `top_k`, and each chunk receives an injected `rrf_score` field for observability.
 
-### Routing Sequence
+### Layer 7 — Context-Aware Pruning & Prompt Construction (`retrieval/pruner.py`)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User
-    participant CLI as CLI Layer
-    participant Graph as LangGraph Workflow
-    participant Direct as DirectResponder
-    participant Search as HybridRetriever
-    participant DB as ChromaDB & BM25
-    participant GraphDB as SymbolTable & DepGraph
-    participant Pruner as Phase 6 Pruner
-    participant LLM as GeminiClient
+This is the most architecturally distinctive layer of NoesisCLI. Instead of concatenating raw retrieved chunks into a prompt, Phase 6 reconstructs a token-efficient skeletal representation of the codebase.
 
-    alt noesiscli ask — general question
-        User->>CLI: noesiscli ask "What is recursion?"
-        CLI->>Graph: state = {route: "direct_llm", query: ...}
-        Graph->>Direct: check_route() → direct_llm_node
-        Direct->>LLM: stream(query, system_instruction)
-        LLM-->>User: Streamed answer (Gemini 3.1 Flash-Lite)
-    else noesiscli query — codebase question
-        User->>CLI: noesiscli query "Where is auth handled?"
-        CLI->>Graph: state = {route: "repository_rag", query: ...}
-        Graph->>Search: check_route() → rag_node
-        Search->>DB: Parallel dense + lexical search
-        DB-->>Search: top-k candidate chunks (both retrievers)
-        Search->>Search: reciprocal_rank_fusion() k=60
-        Search->>GraphDB: Resolve symbols + dependency edges
-        GraphDB-->>Search: target_symbols, reference_symbols
-        Search->>Pruner: CodeStructurePruner + PromptConstructor
-        Pruner-->>Search: Skeletal context-optimized prompt
-        Search->>LLM: stream(pruned_prompt, system_instruction)
-        LLM-->>User: Streamed repository analysis (Gemini)
-    end
-```
+**DependencyContextResolver** (Phase 6.1): Takes the fused retrieved chunks and walks the SymbolTable and DependencyGraph to classify all relevant symbols into two sets. Symbols directly referenced in the retrieved chunks become *target symbols* and will be included with their full implementation bodies. Symbols that are dependencies of targets — parent classes, called functions, inherited interfaces — become *reference symbols* and will appear only as signatures with `...` placeholders. This classification reduces prompt length while preserving the structural context the LLM needs.
+
+**CodeStructurePruner** (Phase 6.2): For each source file touched by the retrieved chunks, it reconstructs a minimal file view. Target symbols appear in full. For reference symbols, the pruner preferentially reuses the pre-computed `class_header` chunks emitted during parsing (avoiding a second parse pass) and falls back to a `_sig_from_code()` helper that extracts just the decorator lines and `def`/`class` signature from the raw source, appending `...` as the body stub. The result is a list of `PrunedBlock` named tuples, each carrying the file path and its reconstructed skeletal content.
+
+**PromptConstructor** (Phase 6.3): Assembles the final LLM prompt. It combines the pruned file blocks with dependency metadata (which symbols call which, which classes inherit from which), chunk locations, and the user's original query. A static system instruction establishes the LLM's role as a codebase reasoning assistant.
+
+### Layer 8 — Fail-safe LLM Client & Terminal UI (`models/client.py`, `utils/ui.py`)
+
+`GeminiClient` wraps LangChain's `ChatGoogleGenerativeAI` with a primary/fallback model pair. Both model instances are lazily initialized on first use to avoid startup latency. The `stream()` method yields tokens from the primary model (`gemini-3.1-flash-lite`); if the primary stream raises any exception (rate limit, quota, network error), it transparently falls back to `gemini-3.5-flash`. The API key is read from either `GOOGLE_API_KEY` or `GEMINI_API_KEY` environment variables.
+
+`stream_response()` in `utils/ui.py` consumes the token generator and accumulates tokens into a `rich.live` panel that re-renders as live Markdown on each new token. Progress bars for the parsing and embedding phases use a unified `make_progress()` factory that configures a spinner, bar, M-of-N count, and elapsed time columns. All Rich calls are guarded by an `_RICH_AVAILABLE` flag so the CLI remains functional in minimal environments that lack the `rich` package.
 
 ---
 
@@ -194,6 +145,31 @@ Tree-sitter parses every Python file into structured **Code Chunks** with exact 
 | `global` | Any other top-level statement block |
 
 Six bug-fix strategies are applied: decorated definition handling, import isolation, per-file import collection, nested function containment, async detection, and class-body traversal correctness.
+
+Every chunk follows this schema:
+
+```python
+{
+    "code_content": str,       # Raw source text of the construct
+    "file_path":    str,       # Absolute path to the source file
+    "node_type":    str,       # See chunk types table above
+    "start_line":   int,       # 1-indexed
+    "end_line":     int,       # 1-indexed
+    "metadata": {
+        "imports_in_file": list[str],  # All imports in the file (for Phase 4)
+        "decorators":      list[str],  # e.g. ["@staticmethod"]
+        "is_async":        bool,
+        "parent_class":    str | None,
+        "is_dunder":       bool,       # __init__, __repr__, etc.
+        "special_type":    str | None, # "property" | "staticmethod" | "classmethod" | ...
+        "docstring":       str | None,
+        "func_name":       str | None, # function / method chunks
+        "class_name":      str | None, # class chunks
+        "base_classes":    list[str],  # class chunks
+        "module_docstring":str | None,
+    }
+}
+```
 
 ### ⚡ Multi-core Parallel Indexing
 `ProcessPoolExecutor` distributes `TreeSitterParser` instances across all CPU cores. Each worker is a module-level function (fully picklable), constructs its own parser, and returns chunk lists. IPC overhead is amortised via batching. Configure with `--workers N`.
@@ -313,33 +289,6 @@ uv run -m noesiscli.cli analyze <repo_path> [--force] [--workers N]
 | `--force` | Re-index even if `.noesis/` already exists |
 | `--workers N` | Parallel parser workers (default: all CPU cores) |
 
-**Example output:**
-
-```
-Found 14 source file(s) in /path/to/repo.
-  → 14 Python file(s) selected for parsing.
-
-[Phase 5.1] Parallel AST parsing — 8 worker(s) / 14 file(s)
-  Parsing with 8 worker(s) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14/14 0:00:01
-
-  → Produced 121 semantic chunk(s) from 14 file(s).
-
-[Phase 1.3] Generating embeddings via Voyage AI — 121 chunk(s)
-  Embedding 121 chunk(s) via Voyage AI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 121/121 0:00:03
-
-Indexing chunks into ChromaDB...
-  → ChromaDB index saved to '.noesis/chroma'
-Building BM25 lexical index...
-  → BM25 index saved to '.noesis/bm25.pkl'
-
-Building Global Symbol Table...
-  → Symbol Table saved to '.noesis/symbol_table.pkl' (85 definitions across 68 unique names)
-Building Codebase Dependency Graph...
-  → Dependency Graph saved to '.noesis/dependency_graph.pkl' (94 nodes, 54 edges)
-
-Indexing completed successfully.
-```
-
 **Artifacts written to `.noesis/`:**
 
 | Path | Contents |
@@ -416,62 +365,6 @@ NoesisCLI/
 ├── .env.example
 ├── pyproject.toml
 └── requirements.txt
-```
-
----
-
-## Implementation Phases
-
-| Phase | Status | Description |
-|---|---|---|
-| **1.1** CLI & Repository Ingestion | ✅ | `argparse` + `os.walk`, ignore list, file path collection |
-| **1.2** Tree-sitter Parser | ✅ | 9 chunk types, 4 strategies, 6 bug fixes |
-| **1.3** Voyage AI Embeddings | ✅ | `voyage-code-3`, batch=128, `input_type` switching |
-| **1.4** ChromaDB Vector Store | ✅ | `PersistentClient`, SQLite, chunk + metadata storage |
-| **1.5** Basic RAG | ✅ | Prototype retrieval + Gemini reasoning (superseded by Phase 3+6) |
-| **2.1** LangGraph Workflow | ✅ | `StateGraph`, `WorkflowState`, node registration |
-| **2.2** CLI Manual Routing | ✅ | `query` → `repository_rag`, `ask` → `direct_llm` |
-| **2.3** Conditional Router | ✅ | `check_route()` function → `START` conditional edges |
-| **2.4** Direct LLM Node | ✅ | `DirectResponder` → `gemini-3.1-flash-lite` |
-| **3.1** BM25 Lexical Indexer | ✅ | `BM25Okapi`, camelCase/snake_case tokenizer, pickle |
-| **3.2** Hybrid Retriever + RRF | ✅ | Concurrent `ThreadPoolExecutor`, RRF k=60, deduplication |
-| **4.1** Global Symbol Table | ✅ | `SymbolDefinition` dataclass, exact + fuzzy lookup |
-| **4.2** Dependency Graph | ✅ | NetworkX DiGraph, import/inherit/call edges |
-| **5.1** Parallel Parser Pipeline | ✅ | `ProcessPoolExecutor`, module-level worker, progress callback |
-| **6.1** Dependency Context Resolver | ✅ | Symbol classification: target vs. reference |
-| **6.2** Code Structure Pruner | ✅ | `class_header` stub reuse, body replacement |
-| **6.3** Prompt Constructor | ✅ | Pruned context + dependency metadata + query assembly |
-| **7.1** Fail-safe LLM Client | ✅ | Primary → Fallback auto-switch on exception |
-| **7.2** Directory & Persistence Manager | ✅ | `.noesis/` creation, pickle + ChromaDB serialization |
-| **7.3** Rich Terminal UI | ✅ | `rich.live` Markdown, progress bars, graceful fallback |
-
----
-
-## Code Chunk Schema
-
-Every semantic chunk produced by `TreeSitterParser` follows this schema:
-
-```python
-{
-    "code_content": str,       # Raw source text of the construct
-    "file_path":    str,       # Absolute path to the source file
-    "node_type":    str,       # See chunk types table above
-    "start_line":   int,       # 1-indexed
-    "end_line":     int,       # 1-indexed
-    "metadata": {
-        "imports_in_file": list[str],  # All imports in the file (for Phase 4)
-        "decorators":      list[str],  # e.g. ["@staticmethod"]
-        "is_async":        bool,
-        "parent_class":    str | None,
-        "is_dunder":       bool,       # __init__, __repr__, etc.
-        "special_type":    str | None, # "property" | "staticmethod" | "classmethod" | ...
-        "docstring":       str | None,
-        "func_name":       str | None, # function / method chunks
-        "class_name":      str | None, # class chunks
-        "base_classes":    list[str],  # class chunks
-        "module_docstring":str | None,
-    }
-}
 ```
 
 ---
