@@ -3,8 +3,11 @@ CLI Entrypoint for NoesisCLI.
 Defines argparse commands:
   - analyze: Ingest and index a local repository
              (ChromaDB + BM25 + SymbolTable + DependencyGraph).
-  - query:   Run a RAG query against the codebase using HybridRetriever,
-             with Symbol Table and Dependency Graph loaded for Phase 6 pruning.
+  - query:   Run a RAG query against the codebase using HybridRetriever.
+             Loaded SymbolTable and DependencyGraph are forwarded into
+             Phase 6 (Context-Aware Pruning & Prompt Construction) so the
+             LLM receives a token-efficient skeletal context rather than
+             raw file dumps.
   - ask:     Ask a general programming question directly to the LLM.
 """
 
@@ -19,6 +22,7 @@ from noesiscli.parser.parallel import ParallelParserPipeline
 from noesiscli.indexing.embedding import EmbeddingGenerator
 from noesiscli.indexing.vector_store import ChromaVectorStore
 from noesiscli.indexing.bm25_store import BM25Store
+from noesiscli.utils.ui import make_progress, embedding_progress
 
 
 def _noesis_dir(repo_path: str) -> str:
@@ -139,7 +143,7 @@ def main():
             return []
 
         # ---------------------------------------------------------------- #
-        # Step 2 — Parallel AST Parsing (Phase 5.1)                        #
+        # Step 2 — Parallel AST Parsing (Phase 5.1)                         #
         # ---------------------------------------------------------------- #
         pipeline = ParallelParserPipeline(max_workers=args.workers)
         num_workers = pipeline.max_workers
@@ -150,52 +154,19 @@ def main():
             f"{effective_workers} worker(s) / {len(python_files)} file(s)"
         )
 
-        # Use Rich progress bar when available, otherwise simple counter
-        try:
-            from rich.progress import (
-                Progress,
-                SpinnerColumn,
-                BarColumn,
-                TextColumn,
-                TimeElapsedColumn,
-                MofNCompleteColumn,
+        # Use ui.make_progress() which handles the Rich/fallback decision
+        with make_progress() as progress:
+            task = progress.add_task(
+                f"Parsing with {effective_workers} worker(s)",
+                total=len(python_files),
             )
 
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[bold cyan]{task.description}"),
-                BarColumn(),
-                MofNCompleteColumn(),
-                TimeElapsedColumn(),
-            ) as progress:
-                task = progress.add_task(
-                    f"Parsing with {effective_workers} worker(s)",
-                    total=len(python_files),
-                )
-
-                def _rich_callback(completed: int, total: int) -> None:
-                    progress.update(task, completed=completed)
-
-                all_chunks = pipeline.parse_files(
-                    python_files, progress_callback=_rich_callback
-                )
-
-        except ImportError:
-            # Fallback: plain text progress
-            _completed_ref = [0]
-
-            def _plain_callback(completed: int, total: int) -> None:
-                _completed_ref[0] = completed
-                print(
-                    f"\r  Parsed {completed}/{total} file(s)...",
-                    end="",
-                    flush=True,
-                )
+            def _parse_callback(completed: int, total: int) -> None:
+                progress.update(task, completed=completed)
 
             all_chunks = pipeline.parse_files(
-                python_files, progress_callback=_plain_callback
+                python_files, progress_callback=_parse_callback
             )
-            print()  # newline after \r sequence
 
         print(
             f"\n  → Produced {len(all_chunks)} semantic chunk(s) from "
@@ -207,11 +178,20 @@ def main():
             return all_chunks
 
         # ---------------------------------------------------------------- #
-        # Step 3 — Generate embeddings (Phase 1.3)                         #
+        # Step 3 — Generate embeddings (Phase 1.3)                          #
         # ---------------------------------------------------------------- #
-        print("\nGenerating embeddings using Voyage AI...")
+        print(f"\n[Phase 1.3] Generating embeddings via Voyage AI — {len(all_chunks)} chunk(s)")
         embed_gen = EmbeddingGenerator()
-        embeddings = embed_gen.embed_chunks(all_chunks)
+
+        with embedding_progress(len(all_chunks)) as (prog, emb_task):
+            def _emb_callback(completed: int, total: int) -> None:
+                prog.advance(emb_task, completed - getattr(_emb_callback, "_last", 0))
+                _emb_callback._last = completed
+
+            texts = [c["code_content"] for c in all_chunks]
+            raw_embeddings = embed_gen.embed_documents(texts, progress_callback=_emb_callback)
+
+        embeddings = raw_embeddings
 
         # ---------------------------------------------------------------- #
         # Step 4 — Persist to ChromaDB (Phase 1.4)                         #
@@ -378,16 +358,20 @@ def main():
             # ask command — no retrieval needed
             wf_graph = WorkflowGraph(llm_client=client, retriever=None)
             route = "direct_llm"
+            symbol_table = None
+            dep_graph = None
 
         graph = wf_graph.compile()
 
+        # Phase 6 structures are threaded through initial_state so that
+        # LangGraph makes them available inside the workflow nodes if needed.
         initial_state = {
             "query": prompt,
             "route": route,
             "context_chunks": [],
             "response": "",
-            "symbol_table": None,
-            "dep_graph": None,
+            "symbol_table": symbol_table,  # Phase 4.1 — consumed by Phase 6
+            "dep_graph": dep_graph,         # Phase 4.2 — consumed by Phase 6
         }
 
         final_state = graph.invoke(initial_state)

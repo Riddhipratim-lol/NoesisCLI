@@ -39,9 +39,15 @@ class EmbeddingGenerator:
         texts = [chunk["code_content"] for chunk in chunks]
         return self.embed_documents(texts)
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    def embed_documents(self, texts: list[str], progress_callback=None) -> list[list[float]]:
         """
         Generate embeddings for a list of document strings, batching as needed.
+
+        Args:
+            texts:             List of source text strings to embed.
+            progress_callback: Optional callable ``(completed: int, total: int) -> None``
+                               invoked after each batch completes.  Used by the CLI
+                               (Phase 7.3) to drive a Rich progress bar.
         """
         if not texts:
             return []
@@ -62,6 +68,8 @@ class EmbeddingGenerator:
                 input_type="document"
             )
             embeddings.extend(response.embeddings)
+            if progress_callback is not None:
+                progress_callback(len(embeddings), len(texts))
         return embeddings
 
     def embed_query(self, query: str) -> list[float]:

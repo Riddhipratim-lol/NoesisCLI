@@ -213,10 +213,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 6 — Context-Aware Pruning & Prompt Construction
+## [x] Phase 6 — Context-Aware Pruning & Prompt Construction
 **Objective:** Optimize LLM token usage and reasoning accuracy by replacing irrelevant function implementations in retrieved files with signatures/placeholders.
 
-### [ ] 6.1: Dependency Context Resolver
+### [x] 6.1: Dependency Context Resolver
 * **What it does:** Inspects the retrieved candidate chunks. Using the Symbol Table and Dependency Graph, it identifies related definitions (e.g., parent classes, helper functions called in the candidate chunk, or interfaces implemented) that are essential for understanding the retrieved code.
 * **What it takes (Inputs):**
   * Ranked retrieved Code Chunks.
@@ -228,7 +228,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Chunks retrieved via Hybrid Retriever (Phase 3.2), Global Symbol Table (Phase 4.1), and Dependency Graph (Phase 4.2).
   * **Outputs to:** Targeted lists of full-implementation and signature-only symbols sent to Code Structure Pruner (Phase 6.2).
 
-### [ ] 6.2: Code Structure Pruner
+### [x] 6.2: Code Structure Pruner
 * **What it does:** Reconstructs the skeletal structure of files containing the retrieved code, keeping full implementation detail only for the targeted symbols, and replacing all other non-essential classes/methods with signatures or `...` placeholders.
 * **What it takes (Inputs):**
   * Source code files.
@@ -241,7 +241,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Target/reference lists (Phase 6.1) and raw source files (Phase 1.1). Leverages Tree-sitter parser (Phase 1.2).
   * **Outputs to:** Skeletal pruned code context blocks sent to Prompt Constructor (Phase 6.3).
 
-### [ ] 6.3: Prompt Constructor
+### [x] 6.3: Prompt Constructor
 * **What it does:** Assembles the context-optimized prompt containing the pruned code files, active dependency relationships, symbol definitions, file locations, metadata, and the user's original query.
 * **What it takes (Inputs):**
   * Pruned code blocks, metadata, and user query.
@@ -253,10 +253,10 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
 
 ---
 
-## [ ] Phase 7 — Robust Multi-Model Fallbacks & System Polish
+## [x] Phase 7 — Robust Multi-Model Fallbacks & System Polish
 **Objective:** Finalize the CLI commands, implement robust client-side retry/fallback logic, serialize graphs, and optimize the overall CLI user experience.
 
-### [ ] 7.1: Fail-safe LLM Client
+### [x] 7.1: Fail-safe LLM Client
 * **What it does:** Wraps all Gemini API calls (reasoning) in a client that detects errors (network failure, rate limit, quota exceeded) on Gemini 3.5 Flash and automatically routes the request to Gemini 3.1 Flash-Lite.
 * **What it takes (Inputs):**
   * API payload (messages, parameters).
@@ -267,7 +267,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Direct responder (Phase 2.4) and Prompt Constructor (Phase 6.3).
   * **Outputs to:** Returns response text or dispatches streamed response tokens to CLI Layer (Phase 7.3).
 
-### [ ] 7.2: Directory & Persistence Manager
+### [x] 7.2: Directory & Persistence Manager
 * **What it does:** Configures the storage locations for the codebase index. Creates a `.noesis/` directory inside the scanned repository to serialize the Symbol Table, Dependency Graph (NetworkX), BM25 data, and ChromaDB database.
 * **What it takes (Inputs):**
   * Scanned repository directory path.
@@ -278,7 +278,7 @@ This document outlines the step-by-step implementation plan for **NoesisCLI**, a
   * **Inputs from:** Repository path (Phase 1.1), ChromaDB index (Phase 1.4), BM25 Index (Phase 3.1), Global Symbol Table (Phase 4.1), and Dependency Graph (Phase 4.2).
   * **Outputs to:** Writes serialized structures to the local repository filesystem. Restores these components on startup to avoid re-indexing.
 
-### [ ] 7.3: Unified CLI User Experience
+### [x] 7.3: Unified CLI User Experience
 * **What it does:** Finalizes CLI behaviors. Provides:
   * Command to re-index the workspace: `noesiscli analyze <path> --force`.
   * Command to enter an interactive query chat loop: `noesiscli chat`.
